@@ -1,0 +1,678 @@
+// PurrRouter front end: vanilla JS, no build step.
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+const ui = {
+  snap: null,
+  filter: localStorage.getItem("rd.filter") || "all",
+  view: localStorage.getItem("rd.view") || "cards",
+  sort: localStorage.getItem("rd.sort") || "ip",
+  query: "",
+  timer: null,
+  busy: new Set(),
+  labels: {},
+  pendingAccess: {},   // mac → { access, until }: what we just told the router, until it reports it back
+  loading: null,
+  nextAt: 0,
+  refreshSec: +(localStorage.getItem("rd.refresh") ?? 30),
+  tab: localStorage.getItem("rd.tab") || "overview",
+  pf: null,
+};
+
+const BANDS = {
+  "5": { label: "5 GHz", g: "var(--g5)", emoji: "⚡" },
+  "2.4": { label: "2.4 GHz", g: "var(--g24)", emoji: "🔥" },
+  wired: { label: "Wired", g: "var(--gwired)", emoji: "🔗" },
+  wireless: { label: "Wi-Fi", g: "linear-gradient(135deg,#38bdf8,#f472b6)", emoji: "📶" },
+  unknown: { label: "Unknown", g: "var(--gunk)", emoji: "❔" },
+};
+const band = b => BANDS[b] ?? { label: b, g: "var(--gunk)", emoji: "❔" };
+
+// ───────────────────────── api ─────────────────────────
+async function api(path, { method = "GET", body } = {}) {
+  const res = await fetch("/api" + path, {
+    method,
+    headers: { "Content-Type": "application/json", "X-PurrRouter": "1" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const err = new Error(data.error || data.detail || data.title || `Request failed (${res.status})`);
+    err.status = res.status;
+    throw err;
+  }
+  return data;
+}
+
+// ───────────────────────── boot ─────────────────────────
+async function boot() {
+  const st = await api("/status");
+  if (!st.configured) return showSetup(st);
+  showDash();
+}
+
+function showSetup(st = {}) {
+  clearInterval(ui.ticker);
+  $("#dash").hidden = true;
+  $("#setup").hidden = false;
+  const f = $("#setupForm");
+  if (st.host) f.host.value = st.host;
+  if (st.username) f.username.value = st.username;
+  if (st.port) f.port.value = st.port;
+  f.useHttps.checked = !!st.useHttps;
+  f.password.focus();
+}
+
+$("#setupForm").addEventListener("submit", async e => {
+  e.preventDefault();
+  const f = e.target, btn = f.querySelector("button"), err = $("#setupError");
+  err.hidden = true;
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin">⟳</span> Connecting…`;
+  try {
+    await api("/setup", {
+      method: "POST",
+      body: {
+        host: f.host.value, username: f.username.value, password: f.password.value,
+        port: +f.port.value || null, useHttps: f.useHttps.checked,
+      },
+    });
+    f.password.value = "";
+    showDash();
+  } catch (ex) {
+    err.textContent = ex.message;
+    err.hidden = false;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "<span>Connect</span>";
+  }
+});
+
+$("#setupForm").useHttps.addEventListener("change", e => { e.target.form.port.value = e.target.checked ? 443 : 80; });
+
+function showDash() {
+  $("#setup").hidden = true;
+  $("#dash").hidden = false;
+  setView(ui.view);
+  $("#sort").value = ui.sort;
+  $("#refreshEvery").value = String(ui.refreshSec);
+  setTab(ui.tab);
+  load(true);
+  clearInterval(ui.ticker);
+  ui.ticker = setInterval(tick, 1000);
+}
+
+// One refresh at a time; the next one is scheduled 30s after the previous one *finishes*
+// (the R6350 takes several seconds to answer, so a fixed interval drifts and overlaps).
+const refreshMs = () => ui.refreshSec * 1000;
+function tick() {
+  const el = $("#updated");
+  if (!ui.snap || !el) return;
+  const at = new Date(ui.snap.fetchedAt).toLocaleTimeString();
+  const left = Math.max(0, Math.ceil((ui.nextAt - Date.now()) / 1000));
+  el.textContent = ui.loading ? `Updated ${at} · refreshing now…`
+    : ui.refreshSec === 0 ? `Updated ${at}`
+    : `Updated ${at} · next in ${left >= 60 ? `${Math.floor(left / 60)}m ${left % 60}s` : `${left}s`}`;
+  if (ui.refreshSec > 0 && !ui.loading && !document.hidden && Date.now() >= ui.nextAt) load(false);
+}
+
+$("#refreshEvery").addEventListener("change", e => {
+  ui.refreshSec = +e.target.value;
+  localStorage.setItem("rd.refresh", ui.refreshSec);
+  ui.nextAt = Date.now() + refreshMs();
+  tick();
+});
+
+// ───────────────────────── load & render ─────────────────────────
+async function load(force) {
+  if (ui.loading) {               // already refreshing: a forced refresh waits and runs right after
+    if (!force) return;
+    await ui.loading.catch(() => {});
+  }
+  ui.loading = loadCore(force).finally(() => { ui.loading = null; ui.nextAt = Date.now() + refreshMs(); tick(); });
+  return ui.loading;
+}
+
+async function loadCore(force) {
+  const btn = $("#refreshBtn");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spin">⟳</span> <span class="hide-sm">Refresh</span>`;
+  try {
+    ui.snap = await api("/snapshot" + (force ? "?force=true" : ""));
+    $("#banner").hidden = true;
+    render();
+  } catch (ex) {
+    if (ex.status === 401 || ex.status === 409) return showSetup(await api("/status"));
+    const b = $("#banner");
+    b.textContent = `⚠ ${ex.message} Showing the last data I had.`;
+    b.hidden = false;
+  } finally {
+    btn.innerHTML = `⟳ <span class="hide-sm">Refresh</span>`;
+    btn.disabled = false;
+  }
+}
+
+function render() {
+  const s = ui.snap;
+  if (!s) return;
+  renderHeader(s);
+  renderTiles(s);
+  renderWan(s);
+  renderWifi(s);
+  renderDevices();
+  tick();
+}
+
+function renderHeader(s) {
+  const r = s.router;
+  $("#routerName").textContent = `Netgear ${r.model}`;
+  document.title = `PurrRouter · ${r.model}`;
+  $("#routerMeta").textContent = [r.firmware && `Firmware ${r.firmware}`, s.lan.ip].filter(Boolean).join(" · ");
+
+  const up = isUp(s);
+  const pill = $("#netPill");
+  pill.className = "pill" + (up === false ? " down" : "");
+  pill.textContent = up === false ? "Internet down" : up ? "Internet up" : "Internet ?";
+}
+
+function isUp(s) {
+  const l = (s.wan.linkStatus || "").toLowerCase();
+  if (l) return l === "up";
+  return s.wan.externalIp && s.wan.externalIp !== "0.0.0.0" ? true : null;
+}
+
+function renderTiles(s) {
+  const d = s.devices;
+  const n = b => d.filter(x => x.band === b).length;
+  const t = s.traffic;
+  const tiles = [
+    { g: "var(--gbrand)", label: "Devices online", emoji: "🛰️", value: d.length, sub: `${d.filter(x => isBlocked(x)).length} blocked · ${d.filter(x => x.isNew).length} new` },
+    { g: "var(--g24)", label: "2.4 GHz", emoji: "🔥", value: n("2.4"), sub: "long range" },
+    { g: "var(--g5)", label: "5 GHz", emoji: "⚡", value: n("5"), sub: "fast lane" },
+    { g: "var(--gwired)", label: "Wired", emoji: "🔗", value: n("wired"), sub: "plugged in" },
+  ];
+  if (t?.enabled && (t.today.downMb != null || t.month.downMb != null)) {
+    tiles.push({ g: "linear-gradient(135deg,#60a5fa,#6366f1)", label: "Today", emoji: "📶", value: mb(t.today.downMb), sub: `↓ down · ↑ ${mb(t.today.upMb)} up` });
+    tiles.push({ g: "linear-gradient(135deg,#c084fc,#db2777)", label: "This month", emoji: "📅", value: mb(t.month.downMb), sub: `↓ down · ↑ ${mb(t.month.upMb)} up` });
+  }
+  $("#tiles").innerHTML = tiles.map(x => `
+    <div class="tile" style="--g:${x.g}">
+      <div class="label"><span>${x.label}</span><span class="emoji">${x.emoji}</span></div>
+      <div class="value">${esc(x.value)}</div>
+      <div class="sub">${esc(x.sub)}</div>
+    </div>`).join("");
+}
+
+function renderWan(s) {
+  const w = s.wan, l = s.lan;
+  const rows = [
+    ["Public IP", w.externalIp], ["Connection", w.connectionType], ["Gateway", w.gateway],
+    ["DNS", w.dns?.replace(/[;,]\s*/g, ", ")], ["Router LAN IP", l.ip], ["Subnet", l.subnet],
+    ["DHCP", l.dhcp == null ? null : l.dhcp ? "On" : "Off"],
+    ["Access control", s.accessControlOn == null ? null : s.accessControlOn ? "On" : "Off"],
+    ["Serial", s.router.serial], ["In service since", s.router.firstUse],
+  ].filter(r => r[1]);
+  $("#wanPanel").innerHTML = `
+    <h3>🌍 Internet & network</h3>
+    <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd class="${/IP|Gateway|DNS|Subnet/.test(k) ? "mono" : ""}">${esc(v)}</dd>`).join("")}</dl>`;
+}
+
+function renderWifi(s) {
+  $("#wifiPanels").innerHTML = s.wifi.map(w => {
+    const b = band(w.band);
+    const on = w.enabled !== false;
+    return `
+    <div class="glass panel wifi" style="--g:${b.g}">
+      <div class="stripe"></div>
+      <h3><span class="band-tag">${b.label}</span> ${on ? "" : `<span class="badge blk">off</span>`}</h3>
+      <div class="ssid">${esc(w.ssid || "(hidden)")}</div>
+      <dl class="kv">
+        ${w.channel ? `<dt>Channel</dt><dd>${esc(w.channel)}</dd>` : ""}
+        ${w.mode ? `<dt>Mode</dt><dd>${esc(w.mode)}</dd>` : ""}
+        ${w.security ? `<dt>Security</dt><dd>${esc(w.security)}</dd>` : ""}
+        <dt>Clients</dt><dd>${s.devices.filter(d => d.band === w.band).length}</dd>
+      </dl>
+      <div class="pw">
+        <span class="mono" id="pw-${w.band.replace(".", "")}">••••••••••</span>
+        <span>
+          <button class="btn sm" data-reveal="${w.band}">👁 Show</button>
+        </span>
+      </div>
+      ${w.guestEnabled == null ? "" : `
+      <div class="guest">
+        <span>🧳 Guest network</span>
+        <label class="switch"><input type="checkbox" data-guest="${w.band}" ${w.guestEnabled ? "checked" : ""}><span></span></label>
+      </div>`}
+    </div>`;
+  }).join("");
+}
+
+// ───────────────────────── devices ─────────────────────────
+// The router can take a refresh or two to report a block/allow we just made, so show the new state right away.
+function accessOf(d) {
+  const p = ui.pendingAccess[d.mac];
+  if (!p) return d.access;
+  if ((d.access || "").toLowerCase() === p.access.toLowerCase() || Date.now() > p.until) {
+    delete ui.pendingAccess[d.mac];
+    return d.access;
+  }
+  return p.access;
+}
+const isBlocked = d => (accessOf(d) || "").toLowerCase() === "block";
+
+function deviceIcon(d) {
+  const n = `${d.nickname || ""} ${d.name || ""} ${d.model || ""}`.toLowerCase();
+  const rules = [
+    [/xbox|playstation|ps[45]|nintendo|steamdeck|steam-deck/, "🎮"],
+    [/roku|tv\b|chromecast|fire.?tv|firestick|shield|appletv|apple-tv|vizio|bravia/, "📺"],
+    [/lifx|hue|bulb|light|wiz|lamp/, "💡"],
+    [/ecobee|thermostat|nest(?!.?mini)|honeywell/, "🌡️"],
+    [/blink|ring|cam|arlo|wyze|eufy|doorbell/, "📷"],
+    [/\bhs1\d\d|kasa|plug|outlet|wemo|smartthings|tapo/, "🔌"],
+    [/echo|alexa|google.?home|nest.?mini|homepod|sonos|speaker/, "🔊"],
+    [/printer|epson|canon|brother|officejet|laserjet/, "🖨️"],
+    [/watch/, "⌚"],
+    [/ipad|tablet|tab\b|galaxy-tab|kindle/, "📖"],
+    [/pixel|galaxy|iphone|phone|android|oneplus|moto|sm-/, "📱"],
+    [/laptop|macbook|book|thinkpad|surface/, "💻"],
+    [/desktop|pc\b|-pc|windows|tower|imac|mac-mini/, "🖥️"],
+    [/nas|synology|qnap|server|plex|pi\b|raspberry/, "🗄️"],
+  ];
+  for (const [rx, e] of rules) if (rx.test(n)) return e;
+  if (d.privateMac) return "📱"; // randomized MACs are almost always phones/tablets
+  return "✨";
+}
+
+function signalBars(sig) {
+  if (sig == null) return "";
+  const n = sig >= 75 ? 4 : sig >= 50 ? 3 : sig >= 25 ? 2 : 1;
+  return `<span class="signal" title="Signal ${sig}%">${[1, 2, 3, 4].map(i => `<i class="${i <= n ? "on" : ""}"></i>`).join("")}</span>`;
+}
+
+function filtered() {
+  const q = ui.query.trim().toLowerCase();
+  let list = ui.snap.devices.filter(d => {
+    if (ui.filter === "blocked") return isBlocked(d);
+    if (ui.filter === "new") return d.isNew;
+    if (ui.filter !== "all" && d.band !== ui.filter) return false;
+    return true;
+  });
+  if (q) list = list.filter(d => [labelFor(d), d.name, d.ip, d.mac, d.ssid, d.model].some(v => (v || "").toLowerCase().includes(q)));
+  const name = d => (d.name || labelFor(d) || "~").toLowerCase();
+  const ip = d => (d.ip || "999").split(".").map(x => x.padStart(3, "0")).join(".");
+  const sorters = {
+    ip: (a, b) => ip(a).localeCompare(ip(b)),
+    name: (a, b) => name(a).localeCompare(name(b)),
+    signal: (a, b) => (b.signal ?? -1) - (a.signal ?? -1),
+    band: (a, b) => a.band.localeCompare(b.band) || ip(a).localeCompare(ip(b)),
+  };
+  return list.sort(sorters[ui.sort] || sorters.ip);
+}
+
+function renderDevices() {
+  const all = ui.snap.devices;
+  $("#devCount").textContent = all.length;
+
+  const counts = { all: all.length, "5": 0, "2.4": 0, wired: 0, blocked: 0, new: 0 };
+  for (const d of all) { counts[d.band] = (counts[d.band] || 0) + 1; if (isBlocked(d)) counts.blocked++; if (d.isNew) counts.new++; }
+  const chips = [
+    ["all", "All", "var(--gbrand)"], ["2.4", "🔥 2.4 GHz", "var(--g24)"], ["5", "⚡ 5 GHz", "var(--g5)"],
+    ["wired", "🔗 Wired", "var(--gwired)"], ["blocked", "⛔ Blocked", "linear-gradient(135deg,#fb7185,#e11d48)"],
+    ["new", "✨ New", "linear-gradient(135deg,#f472b6,#a855f7)"],
+  ].filter(([k]) => k === "all" || counts[k] > 0 || ui.filter === k);
+  $("#chips").innerHTML = chips.map(([k, label, g]) =>
+    `<button class="chip ${ui.filter === k ? "on" : ""}" style="--g:${g}" data-filter="${k}">${label}<span class="n">${counts[k] || 0}</span></button>`).join("");
+
+  const fresh = all.filter(d => d.isNew);
+  const nb = $("#newBar");
+  nb.hidden = fresh.length === 0;
+  nb.innerHTML = fresh.length ? `<span>✨ <b>${fresh.length} new device${fresh.length > 1 ? "s" : ""}</b> joined since you last looked. Make sure you recognize ${fresh.length > 1 ? "them" : "it"}.</span>
+    <button class="btn sm" id="ackAll">👍 I know ${fresh.length > 1 ? "them" : "it"}</button>` : "";
+
+  const list = filtered();
+  $("#devList").innerHTML = list.length ? list.map(deviceCard).join("") : `<div class="empty">No devices match. 🕵️</div>`;
+}
+
+function deviceCard(d, i) {
+  const b = band(d.band);
+  const blocked = isBlocked(d);
+  const title = d.name || "Unknown device";
+  const label = labelFor(d);
+  const badges = [
+    `<span class="badge band">${b.label}</span>`,
+    d.isNew ? `<span class="badge new">NEW</span>` : "",
+    blocked ? `<span class="badge blk">⛔ blocked</span>` : "",
+    d.privateMac ? `<span class="badge" title="This device uses a randomized (private) MAC address">🎭 private MAC</span>` : "",
+    d.ssid ? `<span class="badge">${esc(d.ssid)}</span>` : "",
+  ].join("");
+  const busy = ui.busy.has(d.mac);
+  const canBlock = d.access != null;
+
+  return `
+  <article class="dev ${blocked ? "blocked" : ""}" style="--g:${b.g}; animation-delay:${Math.min(i * 25, 400)}ms" data-mac="${esc(d.mac)}">
+    <div class="dev-top">
+      <div class="icon">${deviceIcon(d)}</div>
+      <div class="dev-name">
+        <div class="n"><span title="${esc(label ? `${title} — ${label}` : title)}">${esc(title)}</span><button class="edit" data-edit="${esc(d.mac)}" title="${label ? "Edit label" : "Add a label"}">🏷️</button></div>
+        <div class="orig ${label ? "label" : ""}">${esc(label || d.model || "")}</div>
+      </div>
+    </div>
+    <div>
+      <div class="ip">${esc(d.ip || "—")}</div>
+      <div class="mac"><span>${esc(d.mac)}</span><button class="copy" data-copy="${esc(d.mac)}" title="Copy MAC">📋</button></div>
+    </div>
+    <div class="badges">${badges}</div>
+    <div class="dev-foot">
+      <span class="sig-wrap">${signalBars(d.signal)}<span class="sig-text" title="Signal: how strongly the router hears this device. Link: the top speed the connection could carry right now, not actual usage.">${[
+        d.signal != null ? `${d.signal}% signal` : "",
+        d.linkRate ? `link ${esc(d.linkRate)} Mbps` : "",
+      ].filter(Boolean).join(" · ")}</span></span>
+      ${canBlock ? `<button class="btn sm ${blocked ? "" : "ghost"}" data-access="${esc(d.mac)}" data-allow="${blocked}" ${busy ? "disabled" : ""}>
+        ${busy ? `<span class="spin">⟳</span>` : blocked ? "✅ Allow" : "⛔ Block"}</button>` : ""}
+    </div>
+  </article>`;
+}
+
+// ───────────────────────── interactions ─────────────────────────
+document.addEventListener("click", async e => {
+  const t = e.target.closest("button, [data-filter]");
+  if (!t) return;
+
+  if (t.dataset.filter) { ui.filter = t.dataset.filter; localStorage.setItem("rd.filter", ui.filter); renderDevices(); }
+  else if (t.dataset.view) setView(t.dataset.view);
+  else if (t.dataset.copy) { await navigator.clipboard.writeText(t.dataset.copy); toast(`Copied ${t.dataset.copy} 📋`, "ok"); }
+  else if (t.dataset.edit) editNickname(t.dataset.edit);
+  else if (t.dataset.access) toggleAccess(t.dataset.access, t.dataset.allow === "true");
+  else if (t.dataset.reveal) revealPassword(t, t.dataset.reveal);
+  else if (t.id === "ackAll") acknowledgeAll();
+  else if (t.id === "refreshBtn") load(true);
+  else if (t.id === "settingsBtn") openSettings();
+  else if (t.id === "rebootBtn") reboot();
+  else if (t.dataset.tab) setTab(t.dataset.tab);
+  else if (t.id === "pfReload") loadPf();
+  else if (t.id === "pfAdd") pfEdit(null);
+  else if (t.dataset.pfEdit) pfEdit(+t.dataset.pfEdit);
+  else if (t.dataset.pfDel) pfDelete(+t.dataset.pfDel);
+});
+
+document.addEventListener("change", async e => {
+  const t = e.target;
+  if (t.dataset.guest) {
+    const want = t.checked;
+    const ok = await confirmBox(`${want ? "Turn on" : "Turn off"} ${band(t.dataset.guest).label} guest network?`,
+      want ? "Uses whatever guest SSID and password are set on the router." : "Anyone on the guest network will be disconnected.", want ? "Turn on" : "Turn off");
+    if (!ok) { t.checked = !want; return; }
+    t.disabled = true;
+    try { await api(`/wifi/${t.dataset.guest}/guest`, { method: "POST", body: { enabled: want } }); toast(`Guest network ${want ? "on" : "off"} 🧳`, "ok"); load(true); }
+    catch (ex) { t.checked = !want; toast(ex.message, "bad"); }
+    finally { t.disabled = false; }
+  }
+});
+
+$("#search").addEventListener("input", e => { ui.query = e.target.value; renderDevices(); });
+$("#sort").addEventListener("change", e => { ui.sort = e.target.value; localStorage.setItem("rd.sort", ui.sort); renderDevices(); });
+
+function setView(v) {
+  ui.view = v;
+  localStorage.setItem("rd.view", v);
+  $("#devList").classList.toggle("list", v === "list");
+  for (const b of document.querySelectorAll("#viewSeg button")) b.classList.toggle("on", b.dataset.view === v);
+}
+
+async function toggleAccess(mac, allow) {
+  const d = ui.snap.devices.find(x => x.mac === mac);
+  const name = labelFor(d) || d?.name || mac;
+  if (!allow && !(await confirmBox(`Block ${name}?`, "It'll be kicked off your network until you allow it again.", "⛔ Block", true))) return;
+  ui.busy.add(mac); renderDevices();
+  try {
+    await api(`/devices/${encodeURIComponent(mac)}/access`, { method: "POST", body: { allow } });
+    toast(`${name} ${allow ? "allowed ✅" : "blocked ⛔"}`, "ok");
+    ui.busy.delete(mac);
+    ui.pendingAccess[mac] = { access: allow ? "Allow" : "Block", until: Date.now() + 120000 };
+    renderDevices();
+    renderTiles(ui.snap);
+    load(true);
+  } catch (ex) { toast(ex.message, "bad"); ui.busy.delete(mac); renderDevices(); }
+}
+
+async function editNickname(mac) {
+  const d = ui.snap.devices.find(x => x.mac === mac);
+  const name = await promptBox("Label this device", `${d?.name || "Unknown device"} · ${mac}`, labelFor(d) || "");
+  if (name === null) return;
+  await api(`/devices/${encodeURIComponent(mac)}/nickname`, { method: "POST", body: { name } });
+  // An auto-refresh may have swapped ui.snap while the dialog was open, so keep the label in an overlay too.
+  ui.labels[mac] = name.trim() || null;
+  renderDevices();
+  toast(name.trim() ? `Labeled “${name.trim()}” 🏷️` : "Label cleared", "ok");
+}
+
+function labelFor(d) {
+  if (!d) return null;
+  return Object.hasOwn(ui.labels, d.mac) ? ui.labels[d.mac] : d.nickname;
+}
+
+async function acknowledgeAll() {
+  const macs = ui.snap.devices.filter(d => d.isNew).map(d => d.mac);
+  await api("/devices/acknowledge", { method: "POST", body: { macs } });
+  for (const d of ui.snap.devices) d.isNew = false;
+  if (ui.filter === "new") ui.filter = "all";
+  render();
+}
+
+async function revealPassword(btn, b) {
+  const el = $(`#pw-${b.replace(".", "")}`);
+  if (btn.dataset.shown) {
+    el.textContent = "••••••••••"; btn.textContent = "👁 Show"; delete btn.dataset.shown; return;
+  }
+  try {
+    const { password } = await api(`/wifi/${b}/password`);
+    el.textContent = password || "(none)";
+    btn.textContent = "🙈 Hide"; btn.dataset.shown = "1";
+    if (password) {
+      const c = document.createElement("button");
+      c.className = "copy"; c.textContent = " 📋"; c.title = "Copy password";
+      c.onclick = ev => { ev.stopPropagation(); navigator.clipboard.writeText(password); toast("Wi-Fi password copied 📋", "ok"); };
+      el.append(c);
+    }
+  } catch (ex) { toast(ex.message, "bad"); }
+}
+
+async function reboot() {
+  if (!(await confirmBox("Reboot the router?", "Everything drops offline for a minute or two while it restarts.", "⏻ Reboot", true))) return;
+  try { await api("/reboot", { method: "POST" }); toast("Rebooting… I'll keep checking back. ☕", "ok"); }
+  catch (ex) { toast(ex.message, "bad"); }
+}
+
+async function openSettings() {
+  const st = await api("/status");
+  const choice = await modal(`
+    <h3>⚙ Settings</h3>
+    <p>Connected to <b class="mono">${esc(st.host)}:${esc(st.port)}</b> as <b>${esc(st.username)}</b>${st.useHttps ? " over HTTPS" : ""}.</p>
+    <div class="actions">
+      <button class="btn ghost" value="cancel">Close</button>
+      <button class="btn danger" value="forget">Sign out & forget password</button>
+    </div>`);
+  if (choice === "forget") { await api("/forget", { method: "POST" }); showSetup(st); }
+}
+
+// ───────────────────────── tabs ─────────────────────────
+function setTab(tab) {
+  ui.tab = tab;
+  localStorage.setItem("rd.tab", tab);
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
+  for (const p of document.querySelectorAll(".tabpane")) p.hidden = p.dataset.pane !== tab;
+  if (tab === "ports" && !ui.pf) loadPf();
+}
+
+// ───────────────────────── port forwarding ─────────────────────────
+const PROTOS = { BOTH: "TCP + UDP", TCP: "TCP", UDP: "UDP" };
+const prettyPorts = r => (r || "").split(",").map(x => { const [a, b] = x.split("-"); return a === b || !b ? a : `${a}–${b}`; }).join(", ");
+const deviceByIp = ip => ui.snap?.devices.find(d => d.ip === ip);
+
+async function loadPf() {
+  $("#pfList").innerHTML = `<div class="empty"><span class="spin">⟳</span> Asking the router…</div>`;
+  try { ui.pf = await api("/portforwards"); renderPf(); fillProtocols(); }
+  catch (ex) { $("#pfList").innerHTML = `<div class="empty">⚠ ${esc(ex.message)}</div>`; }
+}
+
+// The list page doesn't show protocols; ask for each rule's details one by one (read-only, gentle on the router).
+const pfProtoCache = {};
+async function fillProtocols() {
+  for (const r of ui.pf || []) {
+    const key = `${r.number}|${r.name}|${r.externalPorts}|${r.ip}`;
+    if (!pfProtoCache[key]) {
+      try { pfProtoCache[key] = (await api(`/portforwards/${r.number}`)).protocol; } catch { continue; }
+    }
+    r.protocol = pfProtoCache[key];
+    if (ui.tab === "ports") renderPf();
+  }
+}
+
+function renderPf() {
+  const list = ui.pf || [];
+  $("#pfCount").textContent = list.length;
+  $("#pfList").innerHTML = list.length ? list.map((r, i) => {
+    const d = deviceByIp(r.ip);
+    const g = d ? band(d.band).g : "var(--gunk)";
+    const who = d ? `${deviceIcon(d)} ${esc(d.name || "Unknown device")}${labelFor(d) ? ` <span class="pf-label">${esc(labelFor(d))}</span>` : ""}` : "❔ No device online with this IP";
+    const sameIn = r.externalPorts === r.internalPorts;
+    return `
+    <article class="pf" style="--g:${g}; animation-delay:${i * 40}ms">
+      <div class="pf-name"><span class="pf-num">#${r.number}</span> ${esc(r.name)} ${r.protocol ? `<span class="badge">${PROTOS[r.protocol] || r.protocol}</span>` : ""}</div>
+      <div class="pf-flow">
+        <span class="pf-port" title="Port on your public IP">🌍 ${esc(prettyPorts(r.externalPorts))}</span>
+        <span class="pf-arrow">➜</span>
+        <span class="pf-port in" title="Port on the device">${esc(prettyPorts(r.internalPorts))}${sameIn ? "" : " (internal)"}</span>
+      </div>
+      <div class="pf-dev"><span>${who}</span><span class="mono muted">${esc(r.ip)}</span></div>
+      <div class="pf-actions">
+        <button class="btn sm ghost" data-pf-edit="${r.number}">✏️ Edit</button>
+        <button class="btn sm ghost" data-pf-del="${r.number}">🗑 Delete</button>
+      </div>
+    </article>`;
+  }).join("") : `<div class="empty">No port forwarding rules. Your network's front door is shut tight. 🚪🔒</div>`;
+}
+
+async function pfEdit(number) {
+  let rule = { name: "", protocol: "BOTH", externalPorts: "", internalPorts: "", ip: "" };
+  if (number != null) {
+    try { rule = await api(`/portforwards/${number}`); }
+    catch (ex) { return toast(ex.message, "bad"); }
+  }
+  const same = !rule.internalPorts || rule.internalPorts === rule.externalPorts;
+  const devices = [...(ui.snap?.devices || [])].filter(d => d.ip)
+    .sort((a, b) => (labelFor(a) || a.name || "~").localeCompare(labelFor(b) || b.name || "~"));
+  const known = devices.some(d => d.ip === rule.ip);
+  const dlg = $("#modal"), form = $("#modalForm");
+  form.innerHTML = `
+    <h3>${number == null ? "＋ New port forwarding rule" : `✏️ Edit rule #${number}`}</h3>
+    <label>Name <input id="pfName" maxlength="30" value="${esc(rule.name)}" placeholder="e.g. Minecraft server" required></label>
+    <div class="row">
+      <label>Protocol
+        <select id="pfProto">${Object.entries(PROTOS).map(([k, v]) => `<option value="${k}" ${rule.protocol === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+      </label>
+      <label>External port(s) <input id="pfExt" class="mono" value="${esc(prettyPorts(rule.externalPorts).replace(/–/g, "-"))}" placeholder="8080 or 5000-5010"></label>
+    </div>
+    <label class="check"><input type="checkbox" id="pfSame" ${same ? "checked" : ""}> Same port(s) on the device</label>
+    <label id="pfInWrap" ${same ? "hidden" : ""}>Internal port(s) <input id="pfIn" class="mono" value="${same ? "" : esc(prettyPorts(rule.internalPorts).replace(/–/g, "-"))}" placeholder="80"></label>
+    <label>Send to device
+      <select id="pfDev">
+        <option value="">— pick a device —</option>
+        ${devices.map(d => `<option value="${esc(d.ip)}" ${d.ip === rule.ip ? "selected" : ""}>${deviceIcon(d)} ${esc(d.name || "Unknown")}${labelFor(d) ? ` (${esc(labelFor(d))})` : ""} · ${esc(d.ip)}</option>`).join("")}
+        <option value="other" ${rule.ip && !known ? "selected" : ""}>✍️ Other IP address…</option>
+      </select>
+    </label>
+    <label id="pfIpWrap" ${rule.ip && !known ? "" : "hidden"}>IP address <input id="pfIp" class="mono" value="${esc(known ? "" : rule.ip)}" placeholder="192.168.1.50"></label>
+    <p id="pfErr" class="error" hidden></p>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="pfCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="pfSave">${number == null ? "Add rule" : "Save changes"}</button>
+    </div>`;
+  dlg.showModal();
+  $("#pfName").focus();
+  $("#pfSame").onchange = e => { $("#pfInWrap").hidden = e.target.checked; };
+  $("#pfDev").onchange = e => { $("#pfIpWrap").hidden = e.target.value !== "other"; };
+  $("#pfCancel").onclick = () => dlg.close("cancel");
+
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    const err = $("#pfErr"), btn = $("#pfSave");
+    err.hidden = true;
+    const dev = $("#pfDev").value;
+    const body = {
+      name: $("#pfName").value, protocol: $("#pfProto").value,
+      externalPorts: $("#pfExt").value,
+      internalPorts: $("#pfSame").checked ? "" : $("#pfIn").value,
+      ip: dev === "other" ? $("#pfIp").value : dev,
+    };
+    btn.disabled = true; btn.innerHTML = `<span class="spin">⟳</span> Saving…`;
+    try {
+      ui.pf = await api(number == null ? "/portforwards" : `/portforwards/${number}`, { method: number == null ? "POST" : "PUT", body });
+      dlg.close("saved");
+      renderPf();
+      fillProtocols();
+      toast(number == null ? `Rule “${body.name.trim()}” added 🚪` : `Rule “${body.name.trim()}” saved ✅`, "ok");
+    } catch (ex) {
+      err.textContent = ex.message; err.hidden = false;
+      btn.disabled = false; btn.textContent = number == null ? "Add rule" : "Save changes";
+    }
+  };
+  dlg.addEventListener("close", () => { form.onsubmit = null; }, { once: true });
+}
+
+async function pfDelete(number) {
+  const r = ui.pf?.find(x => x.number === number);
+  if (!r) return;
+  if (!(await confirmBox(`Delete “${r.name}”?`, `Ports ${prettyPorts(r.externalPorts)} will stop reaching ${r.ip}.`, "🗑 Delete", true))) return;
+  try {
+    ui.pf = await api(`/portforwards/${number}`, { method: "DELETE" });
+    renderPf();
+    fillProtocols();
+    toast(`Rule “${r.name}” deleted`, "ok");
+  } catch (ex) { toast(ex.message, "bad"); }
+}
+
+// ───────────────────────── modal helpers ─────────────────────────
+function modal(html) {
+  const dlg = $("#modal"), form = $("#modalForm");
+  form.innerHTML = html;
+  dlg.showModal();
+  return new Promise(res => dlg.addEventListener("close", () => res(dlg.returnValue), { once: true }));
+}
+
+async function confirmBox(title, text, okLabel = "OK", danger = false) {
+  const v = await modal(`<h3>${esc(title)}</h3><p>${esc(text)}</p>
+    <div class="actions"><button class="btn ghost" value="no">Cancel</button>
+    <button class="btn ${danger ? "danger" : "primary"}" value="yes">${esc(okLabel)}</button></div>`);
+  return v === "yes";
+}
+
+async function promptBox(title, text, value) {
+  const dlg = $("#modal");
+  const p = modal(`<h3>${esc(title)}</h3><p class="mono small">${esc(text)}</p>
+    <input id="promptIn" value="${esc(value)}" placeholder="e.g. Living room TV" maxlength="40" />
+    <div class="actions"><button class="btn ghost" value="cancel">Cancel</button><button class="btn primary" value="save">Save</button></div>`);
+  const input = $("#promptIn");
+  input.focus(); input.select();
+  input.addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); dlg.close("save"); } });
+  const v = await p;
+  return v === "save" ? input.value : null;
+}
+
+function toast(msg, kind = "") {
+  const el = document.createElement("div");
+  el.className = `toast ${kind}`;
+  el.textContent = msg;
+  $("#toasts").append(el);
+  setTimeout(() => el.remove(), 3800);
+}
+
+// ───────────────────────── utils ─────────────────────────
+function mb(v) {
+  if (v == null) return "—";
+  if (v >= 1024 * 1024) return (v / 1024 / 1024).toFixed(2) + " TB";
+  if (v >= 1024) return (v / 1024).toFixed(v >= 10240 ? 0 : 1) + " GB";
+  return Math.round(v) + " MB";
+}
+
+boot().catch(ex => { document.body.insertAdjacentHTML("beforeend", `<p class="error" style="margin:2rem">${esc(ex.message)}</p>`); });

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PurrRouter</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>" />
+  <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+  <div class="orbs" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+
+  <!-- ───────── Setup ───────── -->
+  <main id="setup" class="setup" hidden>
+    <form id="setupForm" class="glass setup-card" autocomplete="off">
+      <img class="logo-img big" src="logo.svg" alt="" />
+      <h1>PurrRouter</h1>
+      <p class="muted">Sign in to your router once. Your password is encrypted on this PC.</p>
+
+      <label>Router address <input name="host" value="192.168.1.1" required /></label>
+      <label>Username <input name="username" value="admin" required /></label>
+      <label>Password <input name="password" type="password" required autofocus /></label>
+
+      <details>
+        <summary>Advanced</summary>
+        <div class="row">
+          <label>Port <input name="port" type="number" value="80" min="1" max="65535" /></label>
+          <label class="check"><input name="useHttps" type="checkbox" /> Use HTTPS</label>
+        </div>
+      </details>
+
+      <p id="setupError" class="error" hidden></p>
+      <button class="btn primary wide" type="submit"><span>Connect</span></button>
+    </form>
+  </main>
+
+  <!-- ───────── Dashboard ───────── -->
+  <main id="dash" class="dash" hidden>
+    <header class="top">
+      <div class="brand">
+        <img class="logo-img" src="logo.svg" alt="PurrRouter" />
+        <div>
+          <h1 id="routerName">Router</h1>
+          <div class="muted small" id="routerMeta"></div>
+        </div>
+      </div>
+      <div class="top-actions">
+        <span id="netPill" class="pill"></span>
+        <button class="btn ghost" id="refreshBtn" title="Refresh now">⟳ <span class="hide-sm">Refresh</span></button>
+        <button class="btn ghost" id="settingsBtn" title="Settings">⚙</button>
+      </div>
+    </header>
+
+    <nav class="tabs" id="tabs">
+      <button data-tab="overview" class="on">🏠 Overview</button>
+      <button data-tab="ports">🚪 Port forwarding</button>
+    </nav>
+
+    <div id="banner" class="banner" hidden></div>
+
+    <div class="tabpane" data-pane="overview">
+    <section class="tiles" id="tiles"></section>
+
+    <section class="panels">
+      <div class="glass panel" id="wanPanel"></div>
+      <div class="wifi-wrap" id="wifiPanels"></div>
+    </section>
+
+    <section class="glass devices">
+      <div class="dev-head">
+        <h2>Connected devices <span class="count" id="devCount"></span></h2>
+        <div class="dev-tools">
+          <div class="chips" id="chips"></div>
+          <input id="search" class="search" placeholder="🔎  Search name, IP, MAC…" />
+          <select id="sort" class="select" title="Sort">
+            <option value="ip">Sort: IP</option>
+            <option value="name">Sort: Name</option>
+            <option value="signal">Sort: Signal</option>
+            <option value="band">Sort: Band</option>
+          </select>
+          <div class="seg" id="viewSeg">
+            <button data-view="cards" class="on" title="Cards">▦</button>
+            <button data-view="list" title="List">☰</button>
+          </div>
+        </div>
+      </div>
+      <div id="newBar" class="newbar" hidden></div>
+      <div id="devList" class="dev-grid"></div>
+    </section>
+    </div>
+
+    <div class="tabpane" data-pane="ports" hidden>
+      <section class="glass ports">
+        <div class="dev-head">
+          <h2>Port forwarding <span class="count" id="pfCount"></span></h2>
+          <div class="dev-tools">
+            <button class="btn ghost" id="pfReload">⟳ Reload</button>
+            <button class="btn primary" id="pfAdd">＋ Add rule</button>
+          </div>
+        </div>
+        <p class="muted small pf-blurb">Lets the outside world reach a device at home. Anyone on the internet can hit these ports, so only forward what you need. 🔐</p>
+        <div id="pfList" class="pf-list"></div>
+      </section>
+    </div>
+
+    <footer class="foot">
+      <span class="foot-left">
+        <span class="muted small" id="updated"></span>
+        <label class="refresh-pick small" title="How often to ask the router for fresh data">
+          Auto-refresh
+          <select id="refreshEvery" class="select mini">
+            <option value="10">10s</option><option value="15">15s</option><option value="30">30s</option>
+            <option value="60">1 min</option><option value="120">2 min</option><option value="300">5 min</option>
+            <option value="0">Off</option>
+          </select>
+        </label>
+      </span>
+      <button class="btn danger" id="rebootBtn">⏻ Reboot router</button>
+    </footer>
+  </main>
+
+  <!-- ───────── Modal + toasts ───────── -->
+  <dialog id="modal" class="glass modal"><form method="dialog" id="modalForm"></form></dialog>
+  <div id="toasts" class="toasts"></div>
+
+  <script src="app.js"></script>
+</body>
+</html>
