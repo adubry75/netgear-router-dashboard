@@ -15,32 +15,32 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LEGACY = "--legacy" in sys.argv  # simulate firmware without GetAttachDevice2
 
 DEVICES = [
-    ("192.168.1.125", "PIXEL-PHONE", "7E:11:22:33:44:01", "2.4GHz", 72, "144", "HomeWiFi"),
-    ("192.168.1.101", "OFFICE-PC", "54:11:22:33:44:02", "2.4GHz", 55, "72", "HomeWiFi"),
-    ("192.168.1.105", "HS105", "50:11:22:33:44:03", "2.4GHz", 61, "65", "HomeWiFi"),
-    ("192.168.1.103", "BLINK-MINI", "50:11:22:33:44:04", "2.4GHz", 40, "39", "HomeWiFi"),
-    ("192.168.1.113", "MY-ECOBEE", "44:11:22:33:44:05", "2.4GHz", 66, "72", "HomeWiFi"),
-    ("192.168.1.106", "LIFX-MINI", "D0:11:22:33:44:06", "2.4GHz", 48, "54", "HomeWiFi"),
-    ("192.168.1.107", "&lt;unknown&gt;", "90:11:22:33:44:07", "2.4GHz", 30, "24", "HomeWiFi"),
-    ("192.168.1.115", "GALAXY-A03S", "EE:11:22:33:44:08", "2.4GHz", 80, "72", "HomeWiFi"),
-    ("192.168.1.100", "ROKU", "3C:11:22:33:44:09", "5GHz", 90, "433", "HomeWiFi-5G"),
-    ("192.168.1.57", "MEDIA-SERVER", "28:11:22:33:44:0A", "5GHz", 95, "866", "HomeWiFi-5G"),
-    ("192.168.1.118", "PIXEL-9A", "32:11:22:33:44:0B", "5GHz", 70, "585", "HomeWiFi-5G"),
-    ("192.168.1.111", "&lt;unknown&gt;", "68:11:22:33:44:0C", "5GHz", 52, "200", "HomeWiFi-5G"),
-    ("192.168.1.112", "SAMSUNG", "28:11:22:33:44:0D", "5GHz", 63, "400", "HomeWiFi-5G"),
-    ("192.168.1.114", "IPHONE-14", "14:11:22:33:44:0E", "5GHz", 77, "780", "HomeWiFi-5G"),
-    ("192.168.1.2", "DESKTOP-WIRED", "A8:11:22:33:44:0F", "wired", None, "1000", None),
+    ("192.168.1.42", "ANDROID-PHONE", "7E:11:22:33:44:01", "2.4GHz", 72, "144", "HomeWiFi"),
+    ("192.168.1.23", "WORK-LAPTOP", "54:11:22:33:44:02", "2.4GHz", 55, "72", "HomeWiFi"),
+    ("192.168.1.31", "SMART-PLUG", "50:11:22:33:44:03", "2.4GHz", 61, "65", "HomeWiFi"),
+    ("192.168.1.32", "DOORBELL-CAM", "50:11:22:33:44:04", "2.4GHz", 40, "39", "HomeWiFi"),
+    ("192.168.1.33", "THERMOSTAT", "44:11:22:33:44:05", "2.4GHz", 66, "72", "HomeWiFi"),
+    ("192.168.1.34", "SMART-BULB", "D0:11:22:33:44:06", "2.4GHz", 48, "54", "HomeWiFi"),
+    ("192.168.1.35", "&lt;unknown&gt;", "90:11:22:33:44:07", "2.4GHz", 30, "24", "HomeWiFi"),
+    ("192.168.1.43", "TABLET", "EE:11:22:33:44:08", "2.4GHz", 80, "72", "HomeWiFi"),
+    ("192.168.1.20", "STREAMING-STICK", "3C:11:22:33:44:09", "5GHz", 90, "433", "HomeWiFi-5G"),
+    ("192.168.1.10", "MEDIA-SERVER", "28:11:22:33:44:0A", "5GHz", 95, "866", "HomeWiFi-5G"),
+    ("192.168.1.44", "PHONE-2", "32:11:22:33:44:0B", "5GHz", 70, "585", "HomeWiFi-5G"),
+    ("192.168.1.36", "&lt;unknown&gt;", "68:11:22:33:44:0C", "5GHz", 52, "200", "HomeWiFi-5G"),
+    ("192.168.1.21", "SMART-TV", "28:11:22:33:44:0D", "5GHz", 63, "400", "HomeWiFi-5G"),
+    ("192.168.1.45", "IPHONE", "14:11:22:33:44:0E", "5GHz", 77, "780", "HomeWiFi-5G"),
+    ("192.168.1.5", "DESKTOP-WIRED", "A8:11:22:33:44:0F", "wired", None, "1000", None),
 ]
 BLOCKED = set()
 TOKEN = None
-RULES = [{"name": "web server", "ex": "5000-5000", "in": "5000-5000", "ip": "192.168.1.57", "proto": "1"},
-         {"name": "Media", "ex": "8096-8096", "in": "8096-8096", "ip": "192.168.1.57", "proto": "0"}]
+RULES = [{"name": "web server", "ex": "8080-8080", "in": "80-80", "ip": "192.168.1.10", "proto": "1"},
+         {"name": "Game server", "ex": "25565-25565", "in": "25565-25565", "ip": "192.168.1.23", "proto": "0"}]
 GUEST = {"2.4": False, "5": False}
 COOKIE = "sess_id=abc123; path=/"
 
 FIELDS = {
     "DeviceInfo:1#GetInfo": dict(ModelName="R6350", Firmwareversion="V1.1.1.88", SerialNumber="TEST0000SERIAL",
-                                FirstUseDate="Saturday, 26 October 2019 16:25:13", DeviceName="R6350"),
+                                FirstUseDate="Tuesday, 14 March 2023 09:42:07", DeviceName="R6350"),
     "WANIPConnection:1#GetInfo": dict(NewEnable="1", NewConnectionType="DHCP", NewExternalIPAddress="203.0.113.10",
                                       NewSubnetMask="255.255.252.0", NewAddressingType="DHCP", NewDefaultGateway="203.0.113.1",
                                       NewMACAddress="58:96:93:00:11:22", NewDNSServers="75.75.75.75 75.75.76.76"),
