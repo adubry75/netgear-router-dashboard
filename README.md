@@ -9,7 +9,9 @@ devices with one click.
 
 Built and tested on the **Netgear R6350**, firmware V1.1.1.88. The device list, block/allow and Wi-Fi info use
 Netgear's SOAP API (the same one Home Assistant's Netgear integration uses via pynetgear), so other Netgear models
-may work too, but only the R6350 has been tested. Port forwarding and band detection read the router's own web
+may work too, but only the R6350 has been tested. According to
+[OpenWrt](https://openwrt.org/toh/netgear/r6350), the **R6260** and **R6850** use the same factory firmware image as the
+R6350, so they're the most likely to work fully. Reports welcome! Port forwarding and band detection read the router's own web
 pages, which are more likely to differ between models.
 
 ![PurrRouter dashboard](docs/screenshot.png)
@@ -62,5 +64,5 @@ Then sign in to address `127.0.0.1`, port `8099` (under Advanced), password `tes
 Diagnostics: http://localhost:5280/api/diag shows the last 200 router requests (passwords and cookies are never logged).
 
 ## Keywords
-Netgear R6350 dashboard · Netgear router admin alternative · Netgear attached devices · Netgear SOAP API ·
+Netgear R6350 dashboard · Netgear R6260 · Netgear R6850 · Netgear router admin alternative · Netgear attached devices · Netgear SOAP API ·
 Netgear port forwarding tool · home network monitor · .NET 10 · ASP.NET Core
