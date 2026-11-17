@@ -353,3 +353,12 @@ label.check { display: flex; align-items: center; gap: .5rem; }
 :root { --paw: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='-26 -28 52 58'%3E%3Cellipse cx='0' cy='14' rx='17' ry='14'/%3E%3Cellipse cx='-19' cy='-6' rx='6.5' ry='8.5'/%3E%3Cellipse cx='-7' cy='-17' rx='6.5' ry='9'/%3E%3Cellipse cx='7' cy='-17' rx='6.5' ry='9'/%3E%3Cellipse cx='19' cy='-6' rx='6.5' ry='8.5'/%3E%3C/svg%3E"); }
 .paws { opacity: .05; }
 .modal.eared { position: fixed; overflow: visible; } /* keep the dialog centered in the top layer; let ears poke out */
+
+/* ───── DHCP reservations ───── */
+.rsv-info { display: flex; gap: .8rem; align-items: center; flex-wrap: wrap; font-size: .9rem; }
+.rsv-pool { color: var(--muted); }
+.rsv-pool b { color: var(--ink); font-weight: 600; }
+.pf.rsv { grid-template-columns: minmax(170px, 1fr) minmax(150px, .8fr) minmax(240px, 1.6fr) auto; }
+.badge.ok { background: rgba(74, 222, 128, .18); color: #bbf7d0; }
+.badge.warn { background: rgba(251, 191, 36, .18); color: #fde68a; }
+@media (max-width: 1000px) { .pf.rsv { grid-template-columns: 1fr 1fr; } }

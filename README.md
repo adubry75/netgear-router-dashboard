@@ -21,6 +21,7 @@ pages, which are more likely to differ between models.
 - 🏷️ Your own **labels** for "UNKNOWN" devices, plus a **NEW** badge when an unfamiliar device joins
 - ⛔ **Block / allow** devices (Netgear Access Control)
 - 🚪 **Port forwarding**: list, add, edit, delete rules, picking the target from your devices
+- 🧺 **DHCP address reservations** (LAN Setup): list, add, edit, delete; pick the device, see who's using each address
 - 📶 Both Wi-Fi bands: SSID, channel, mode, show/copy the Wi-Fi password, guest network on/off
 - 🌍 Internet status, public IP, DNS, gateway; traffic meter (today / this month)
 - ⏱️ Adjustable auto-refresh; ⏻ reboot button

@@ -253,6 +253,46 @@ public sealed class RouterService(SettingsStore store, ILogger<RouterService> lo
         return string.Join(",", output);
     }
 
+    // ───────────────────────── DHCP reservations ─────────────────────────
+
+    public Task<DhcpInfo> GetDhcpAsync(CancellationToken ct) => Client.GetDhcpAsync(ct);
+
+    public async Task<DhcpInfo> SaveReservationAsync(int? number, ReservationInput input, CancellationToken ct)
+    {
+        var r = ValidateReservation(input);
+        if (number is null) return await Client.AddReservationAsync(r, ct);
+        var expect = (input.OriginalMac ?? "").Trim();
+        if (expect.Length == 0) throw new ValidationException("Missing the reservation's original MAC address. Reload and try again.");
+        return await Client.UpdateReservationAsync(number.Value, expect, r with { Number = number.Value }, ct);
+    }
+
+    public Task<DhcpInfo> DeleteReservationAsync(int n, string? mac, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(mac)
+            ? throw new ValidationException("Missing the reservation's MAC address. Reload and try again.")
+            : Client.DeleteReservationAsync(n, mac, ct);
+
+    /// <summary>Same rules as LAN_reserv_add.htm's checkData(), plus no quotes/backslashes (they'd break the router's own JS list).</summary>
+    DhcpReservation ValidateReservation(ReservationInput i)
+    {
+        var name = (i.Name ?? "").Trim();
+        if (name.Length is 0 or > 20 || name.Any(ch => ch is < ' ' or > '~' or '"' or '\\'))
+            throw new ValidationException("Name must be 1–20 plain characters (letters, numbers, spaces, punctuation; no quotes or backslashes).");
+        if (name is "UNKNOWN" or "UNKNOWN NAME") throw new ValidationException("Give the device a real name (the router refuses “UNKNOWN”).");
+
+        var hex = new string([.. (i.Mac ?? "").Where(Uri.IsHexDigit)]).ToUpperInvariant();
+        var macOk = hex.Length == 12 && System.Text.RegularExpressions.Regex.IsMatch((i.Mac ?? "").Trim(), @"^[0-9A-Fa-f]{2}([:-]?)([0-9A-Fa-f]{2}\1){4}[0-9A-Fa-f]{2}$");
+        if (!macOk) throw new ValidationException("MAC address must look like 44:61:32:2A:48:F6.");
+        if ((Convert.ToByte(hex[..2], 16) & 1) == 1 || hex is "000000000000" or "FFFFFFFFFFFF")
+            throw new ValidationException("That's not a device's MAC address (it's a multicast/broadcast one).");
+        var mac = string.Join(':', Enumerable.Range(0, 6).Select(k => hex.Substring(k * 2, 2)));
+
+        // Syntax only here; the client checks the subnet against LAN Setup's own LAN IP / mask right before saving.
+        var raw = (i.Ip ?? "").Trim();
+        if (raw.Split('.').Length != 4 || !System.Net.IPAddress.TryParse(raw, out var ip) || ip.GetAddressBytes().Length != 4)
+            throw new ValidationException("Enter a valid IPv4 address like 192.168.1.50.");
+        return new DhcpReservation(0, ip.ToString(), name, mac);
+    }
+
     public Task<(int Status, string Body)> GetRouterPageAsync(string path, CancellationToken ct) =>
         Client.GetWebPageAsync(path, ct);
 
@@ -340,6 +380,7 @@ public sealed class Snapshot
 }
 
 public record PortForwardInput(string? Name, string? Protocol, string? ExternalPorts, string? InternalPorts, string? Ip);
+public record ReservationInput(string? Name, string? Mac, string? Ip, string? OriginalMac);
 public sealed class ValidationException(string message) : Exception(message);
 
 public record RouterInfo(string Model, string? Name, string? Firmware, string? Serial, string? FirstUse, double? Cpu, double? Memory);

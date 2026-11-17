@@ -17,6 +17,7 @@ const ui = {
   refreshSec: +(localStorage.getItem("rd.refresh") ?? 30),
   tab: localStorage.getItem("rd.tab") || "overview",
   pf: null,
+  dhcp: null,
 };
 
 const BANDS = {
@@ -161,6 +162,7 @@ function render() {
   renderWifi(s);
   renderDevices();
   if (ui.pf) renderPf(); // rules may have loaded before the device list they link to
+  if (ui.dhcp) renderDhcp();
   tick();
 }
 
@@ -344,6 +346,7 @@ function deviceCard(d, i) {
     d.isNew ? `<span class="badge new">NEW KITTEN</span>` : "",
     blocked ? `<span class="badge blk">⛔ blocked</span>` : "",
     d.privateMac ? `<span class="badge" title="This device uses a randomized (private) MAC address">🎭 private MAC</span>` : "",
+    reservationFor(d.mac) ? `<span class="badge" title="Reserved address: ${esc(reservationFor(d.mac).ip)}">🧺 reserved</span>` : "",
     d.ssid ? `<span class="badge">${esc(d.ssid)}</span>` : "",
   ].join("");
   const busy = ui.busy.has(d.mac);
@@ -395,6 +398,10 @@ document.addEventListener("click", async e => {
   else if (t.id === "pfAdd") pfEdit(null);
   else if (t.dataset.pfEdit) pfEdit(+t.dataset.pfEdit);
   else if (t.dataset.pfDel) pfDelete(+t.dataset.pfDel);
+  else if (t.id === "rsvReload") loadDhcp();
+  else if (t.id === "rsvAdd") rsvEdit(null);
+  else if (t.dataset.rsvEdit) rsvEdit(+t.dataset.rsvEdit);
+  else if (t.dataset.rsvDel) rsvDelete(+t.dataset.rsvDel);
 });
 
 document.addEventListener("change", async e => {
@@ -504,6 +511,7 @@ function setTab(tab) {
   for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("on", b.dataset.tab === tab);
   for (const p of document.querySelectorAll(".tabpane")) p.hidden = p.dataset.pane !== tab;
   if (tab === "ports" && !ui.pf) loadPf();
+  if (tab === "dhcp" && !ui.dhcp) loadDhcp();
 }
 
 // ───────────────────────── port forwarding ─────────────────────────
@@ -668,6 +676,140 @@ async function pfDelete(number) {
     renderPf();
     fillProtocols();
     toast(`Rule “${r.name}” deleted: flap sealed 🔒`, "ok");
+  } catch (ex) { toast(ex.message, "bad"); }
+}
+
+// ───────────────────────── DHCP reservations ─────────────────────────
+const macKey = m => (m || "").toUpperCase().replace(/[^0-9A-F]/g, "");
+const deviceByMac = mac => ui.snap?.devices.find(d => macKey(d.mac) === macKey(mac));
+const reservationFor = mac => ui.dhcp?.reservations.find(r => macKey(r.mac) === macKey(mac));
+const ipSort = ip => (ip || "999").split(".").map(x => x.padStart(3, "0")).join(".");
+
+async function loadDhcp() {
+  $("#rsvList").innerHTML = `<div class="empty"><span class="spin">🧶</span> Counting the cat baskets…</div>`;
+  try { ui.dhcp = await api("/dhcp"); renderDhcp(); if (ui.snap) renderDevices(); }
+  catch (ex) { $("#rsvList").innerHTML = `<div class="empty">🙀 ${esc(ex.message)}</div>`; }
+}
+
+function renderDhcp() {
+  const d = ui.dhcp;
+  if (!d) return;
+  const list = d.reservations;
+  $("#rsvCount").textContent = list.length;
+  $("#rsvInfo").innerHTML = [
+    `<span class="pill ${d.enabled === false ? "down" : ""}">${d.enabled === false ? "🙀 DHCP server off" : "😺 DHCP server on"}</span>`,
+    d.poolStart && d.poolEnd ? `<span class="rsv-pool">Automatic addresses: <b class="mono">${esc(d.poolStart)}</b> – <b class="mono">${esc(d.poolEnd)}</b></span>` : "",
+    d.enabled === false ? `<span class="muted small">With the router's DHCP server off, reservations have no effect.</span>` : "",
+  ].join("");
+  $("#rsvList").innerHTML = list.length ? [...list].sort((a, b) => ipSort(a.ip).localeCompare(ipSort(b.ip))).map((r, i) => {
+    const dev = deviceByMac(r.mac);
+    const g = dev ? band(dev.band).g : "var(--gunk)";
+    const who = dev
+      ? `${deviceIcon(dev)} ${esc(labelFor(dev) || dev.name || "Unknown device")}`
+      : `💤 Not online right now`;
+    const where = !dev ? "" : dev.ip === r.ip
+      ? `<span class="badge ok">😺 using it</span>`
+      : `<span class="badge warn" title="The device is online but hasn't picked up its reserved address yet">online at ${esc(dev.ip || "?")}</span>`;
+    return `
+    <article class="pf rsv" style="--g:${g}; animation-delay:${i * 30}ms">
+      <div class="pf-name"><span class="pf-num">#${r.number}</span> ${esc(r.name)}</div>
+      <div class="pf-flow"><span class="pf-port" title="Reserved address">🧺 ${esc(r.ip)}</span></div>
+      <div class="pf-dev"><span>${who} ${where}</span><span class="mono muted">${esc(r.mac)} <button class="copy" data-copy="${esc(r.mac)}" title="Copy MAC">📋</button></span></div>
+      <div class="pf-actions">
+        <button class="btn sm ghost" data-rsv-edit="${r.number}">✏️ Edit</button>
+        <button class="btn sm ghost" data-rsv-del="${r.number}">🗑 Delete</button>
+      </div>
+    </article>`;
+  }).join("") : `<div class="empty">No reservations yet. Every cat is sleeping wherever it lands. 🐈💤</div>`;
+}
+
+// Router names: printable ASCII, max 20, no quotes/backslashes (they'd break the router's own page).
+const routerName = s => (s || "").replace(/[^\x20-\x7E]|["\\]/g, "").trim().slice(0, 20);
+
+function rsvEdit(number) {
+  const row = number == null ? null : ui.dhcp?.reservations.find(r => r.number === number);
+  if (number != null && !row) return toast("That reservation isn't in the list anymore. Hit Reload and try again.", "bad");
+  const rule = row ? { ...row } : { name: "", mac: "", ip: "" };
+  const devices = [...(ui.snap?.devices || [])].filter(d => d.mac)
+    .sort((a, b) => (labelFor(a) || a.name || "~").localeCompare(labelFor(b) || b.name || "~"));
+  const picked = row ? devices.find(d => macKey(d.mac) === macKey(row.mac)) : null;
+  const dlg = $("#modal"), form = $("#modalForm");
+  form.innerHTML = `
+    <h3>${row ? `✏️ Edit reservation #${row.number}` : "🧺 Reserve an address"}</h3>
+    <label>Device
+      <select id="rsvDev">
+        <option value="">— pick a device —</option>
+        ${devices.map(d => {
+          const taken = reservationFor(d.mac);
+          const self = row && macKey(d.mac) === macKey(row.mac);
+          return `<option value="${esc(d.mac)}" ${picked === d ? "selected" : ""} ${taken && !self ? "disabled" : ""}>${deviceIcon(d)} ${esc(labelFor(d) || d.name || "Unknown")} · ${esc(d.ip || "no IP")}${taken && !self ? " · already reserved" : ""}</option>`;
+        }).join("")}
+        <option value="other" ${row && !picked ? "selected" : ""}>✍️ Enter a MAC address…</option>
+      </select>
+    </label>
+    <label id="rsvMacWrap" ${row && !picked ? "" : "hidden"}>MAC address <input id="rsvMac" class="mono" value="${esc(rule.mac)}" placeholder="44:61:32:2A:48:F6" maxlength="17"></label>
+    <div class="row">
+      <label>Name on the router <input id="rsvName" maxlength="20" value="${esc(rule.name)}" placeholder="e.g. LIVING-ROOM-TV" required></label>
+      <label>Reserved IP <input id="rsvIp" class="mono" value="${esc(rule.ip)}" placeholder="192.168.1.50" required></label>
+    </div>
+    <p class="muted small" id="rsvHint"></p>
+    <p id="rsvErr" class="error" hidden></p>
+    <div class="actions">
+      <button type="button" class="btn ghost" id="rsvCancel">Cancel</button>
+      <button type="submit" class="btn primary" id="rsvSave">${row ? "Save changes" : "Reserve it"}</button>
+    </div>`;
+  dlg.showModal();
+  $("#rsvDev").focus();
+
+  const hint = () => {
+    const ip = $("#rsvIp").value.trim(), d = ui.dhcp;
+    const owner = ui.snap?.devices.find(x => x.ip === ip && macKey(x.mac) !== macKey(currentMac()));
+    $("#rsvHint").textContent = owner ? `⚠ ${labelFor(owner) || owner.name || "Another device"} is using ${ip} right now.`
+      : d?.poolStart ? `Tip: the router hands out ${d.poolStart} – ${d.poolEnd} automatically.` : "";
+  };
+  const currentMac = () => $("#rsvDev").value === "other" ? $("#rsvMac").value : $("#rsvDev").value;
+  $("#rsvDev").onchange = e => {
+    const v = e.target.value;
+    $("#rsvMacWrap").hidden = v !== "other";
+    const d = devices.find(x => x.mac === v);
+    if (d) {
+      if (!row || !$("#rsvName").value) $("#rsvName").value = routerName(labelFor(d) || (d.name !== "Unknown device" ? d.name : "") || "");
+      if (!row || !$("#rsvIp").value) $("#rsvIp").value = d.ip || "";
+    }
+    hint();
+  };
+  $("#rsvIp").oninput = hint;
+  hint();
+  $("#rsvCancel").onclick = () => dlg.close("cancel");
+
+  form.onsubmit = async ev => {
+    ev.preventDefault();
+    const err = $("#rsvErr"), btn = $("#rsvSave");
+    err.hidden = true;
+    const body = { name: $("#rsvName").value, mac: currentMac(), ip: $("#rsvIp").value, originalMac: row?.mac };
+    if (!body.mac) { err.textContent = "Pick a device or enter its MAC address."; err.hidden = false; return; }
+    btn.disabled = true; btn.innerHTML = `<span class="spin">🧶</span> Saving…`;
+    try {
+      ui.dhcp = await api(row ? `/dhcp/reservations/${row.number}` : "/dhcp/reservations", { method: row ? "PUT" : "POST", body });
+      dlg.close("saved");
+      renderDhcp(); renderDevices();
+      toast(row ? `Reservation “${body.name.trim()}” saved 😺` : `${body.ip.trim()} is now ${body.name.trim()}'s basket 🧺`, "ok");
+    } catch (ex) {
+      err.textContent = ex.message; err.hidden = false;
+      btn.disabled = false; btn.textContent = row ? "Save changes" : "Reserve it";
+    }
+  };
+  dlg.addEventListener("close", () => { form.onsubmit = null; }, { once: true });
+}
+
+async function rsvDelete(number) {
+  const r = ui.dhcp?.reservations.find(x => x.number === number);
+  if (!r) return;
+  if (!(await confirmBox(`Remove ${r.name}'s reservation?`, `${r.ip} will no longer be held for ${r.mac}.`, "🗑 Remove", true))) return;
+  try {
+    ui.dhcp = await api(`/dhcp/reservations/${number}?mac=${encodeURIComponent(r.mac)}`, { method: "DELETE" });
+    renderDhcp(); renderDevices();
+    toast(`Reservation for ${r.name} removed: basket's up for grabs 🧺`, "ok");
   } catch (ex) { toast(ex.message, "bad"); }
 }
 

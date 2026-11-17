@@ -218,7 +218,8 @@ public sealed partial class NetgearClient
         if (_webCookie is not null) hdrs.Add(("Cookie", _webCookie));
 
         var todo = fields.FirstOrDefault(f => f.Key == "todo").Value;
-        Diag.Log($"  WEB POST todo={todo} {string.Join(", ", fields.Where(f => f.Key is "h_pfw_name" or "c4_pfw_ip" or "h_pfw_proto" or "h_pfw_ex_range" or "h_pfw_in_range" or "ruleSelect" or "edit").Select(f => $"{f.Key}={f.Value}"))}");
+        Diag.Log($"  WEB POST todo={todo} {string.Join(", ", fields.Where(f => f.Key is "h_pfw_name" or "c4_pfw_ip" or "h_pfw_proto" or "h_pfw_ex_range" or "h_pfw_in_range" or "ruleSelect" or "edit"
+            or "dv_name" or "c4_rsv_ip" or "rsv_mac" or "h_dhcp_server" or "c4_sysLANIPAddr" or "c4_sysPoolStartingAddr" or "c4_sysPoolFinishAddr").Select(f => $"{f.Key}={f.Value}"))}");
         try
         {
             var sw = System.Diagnostics.Stopwatch.StartNew();

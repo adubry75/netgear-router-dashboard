@@ -1,7 +1,7 @@
 """
 Fake Netgear R6350 for testing PurrRouter without a real router.
 
-Speaks the SOAP API (port 8099) and the web pages PurrRouter uses (Attached Devices, Port Forwarding).
+Speaks the SOAP API (port 8099) and the web pages PurrRouter uses (Attached Devices, Port Forwarding, LAN Setup reservations).
 Login: admin / test.   Flags:
   --r6350   mimic R6350 firmware quirks (drops GetAttachDevice2, junk "BLOCK 44" header, no band info in SOAP)
   --xsrf    web pages want a token cookie handed out on the first 401
@@ -36,6 +36,16 @@ TOKEN = None
 RULES = [{"name": "web server", "ex": "8080-8080", "in": "80-80", "ip": "192.168.1.10", "proto": "1"},
          {"name": "Game server", "ex": "25565-25565", "in": "25565-25565", "ip": "192.168.1.23", "proto": "0"}]
 GUEST = {"2.4": False, "5": False}
+EDITING = 0
+RESERVED = [{"ip": "192.168.1.10", "name": "MEDIA-SERVER", "mac": "28:11:22:33:44:0A"},
+            {"ip": "192.168.1.5", "name": "DESKTOP-WIRED", "mac": "A8:11:22:33:44:0F"}]
+# LAN Setup exactly as the R6350 reports it; a Delete/Edit post must echo these back unchanged.
+LAN = {"device_name": "R6350", "c4_sysLANIPAddr": "192.168.1.1", "c4_sysLANSubnetMask": "255.255.255.0",
+       "c4_sysPoolStartingAddr": "192.168.1.100", "c4_sysPoolFinishAddr": "192.168.1.254",
+       "h_rip_direction": "both", "h_sysRIPVersion": "0", "h_dhcp_server": "enable", "h_wds": "disable", "h_apmode": "1"}
+LAN_POSTED = {"h_rip_direction": "Both", "h_sysRIPVersion": "Disable", "rip_direction": "Both", "sysRIPVersion": "Disable",
+              "dhcp_server": "dhcp_server", "sysLANIPAddr1": "192", "sysLANIPAddr4": "1", "sysLANSubnetMask4": "0",
+              "sysPoolStartingAddr4": "100", "sysPoolFinishAddr4": "254"}
 COOKIE = "sess_id=abc123; path=/"
 
 FIELDS = {
@@ -126,8 +136,46 @@ class H(BaseHTTPRequestHandler):
 <input type="hidden" name="h_srvtype" value="{r['proto']}"><input type="hidden" name="c4_server_ip" value="{r['ip']}">
 <input type="hidden" name="SID" value=""></form></body></html>"""
 
+    def lan_page(self):
+        global TOKEN
+        import secrets
+        TOKEN = secrets.token_hex(8)
+        rows = "".join(f"{r['ip']}{r['name']}{r['mac']}" for r in RESERVED)
+        hidden = "".join(f'<input type="hidden" name="{k}" value="{v}">' for k, v in LAN.items() if k != "device_name")
+        return f"""<html><head><script><!--
+function print_all_reserve()
+{{
+	var all_reserve = "{rows}";
+}}
+//--></script></head><body><form name="frmLan" method="POST" action="setup.cgi?id={TOKEN}">
+<input type="text" maxlength="12" size="24" name="device_name" value="{LAN['device_name']}">
+<input type="checkbox" name="dhcp_server" value="dhcp_server">
+{hidden}<input type="hidden" name="h_ruleSelect" value=""><input type="hidden" name="todo" value="save">
+<input type="hidden" name="this_file" value="LAN_lan.htm"><input type="hidden" name="next_file" value="LAN_lan.htm"><input type="hidden" name="SID" value="">
+</form></body></html>"""
+
+    def rsv_page(self, this_file, r=None):
+        global TOKEN
+        import secrets
+        TOKEN = secrets.token_hex(8)
+        r = r or {"ip": "", "name": "", "mac": ""}
+        return f"""<html><body><form method="POST" action="setup.cgi?id={TOKEN}">
+{'<input class="apply_bt" type="SUBMIT" name="apply" value=" Apply ">' if this_file.endswith("edit.htm") else '<input class="apply_bt" type="SUBMIT" name="Add" value=" Add ">'}
+<input type="text" name="rsv_ip1" value=""><input type="text" name="rsv_ip2" value=""><input type="text" name="rsv_ip3" value=""><input type="text" name="rsv_ip4" value="">
+<input type="text" name="rsv_mac" class="num" size="17" maxlength="17" value="{r['mac']}">
+<input type="text" name="dv_name" size="20" maxlength="20" value="{r['name']}">
+{'<input type="hidden" name="todo" value="save"><input type="hidden" name="h_ruleSelect" value="' + str(EDITING) + '"><input type="hidden" name="c4_rsv_ip" value="' + r['ip'] + '"><input type="hidden" name="edit" value="1">' if this_file.endswith("edit.htm") else '<input type="hidden" name="c4_rsv_ip" value="192.168.1."><input type="hidden" name="todo" value="save">'}
+<input type="hidden" name="this_file" value="{this_file}"><input type="hidden" name="next_file" value="LAN_lan.htm"><input type="hidden" name="SID" value="">
+</form></body></html>"""
+
     def do_GET(self):
         import base64
+        if self.path.startswith("/LAN_lan.htm"):
+            if not self.web_auth_ok(): return self.html("", 401)
+            return self.html(self.lan_page())
+        if self.path.startswith("/LAN_reserv_add.htm"):
+            if not self.web_auth_ok(): return self.html("", 401)
+            return self.html(self.rsv_page("LAN_reserv_add.htm"))
         if self.path.startswith("/FW_forward.htm"):
             if not self.web_auth_ok(): return self.html("", 401)
             return self.html(self.fw_list_page())
@@ -156,10 +204,28 @@ class H(BaseHTTPRequestHandler):
             if not self.web_auth_ok(): return self.html("", 401)
             body = self.rfile.read(int(self.headers.get("Content-Length", 0))).decode()
             f = {k: v[0] for k, v in parse_qs(body, keep_blank_values=True).items()}
-            print("WEB POST", f.get("todo"), {k: f.get(k) for k in ("h_pfw_name","c4_pfw_ip","h_pfw_proto","h_pfw_ex_range","h_pfw_in_range","ruleSelect","edit")}, flush=True)
+            print("WEB POST", f.get("todo"), f.get("this_file"), {k: f.get(k) for k in ("h_pfw_name","c4_pfw_ip","h_pfw_proto","h_pfw_ex_range","h_pfw_in_range","ruleSelect","edit","dv_name","c4_rsv_ip","rsv_mac")}, flush=True)
             if self.path.split("=",1)[1] != TOKEN:
                 return self.html("<script>alert('Session expired')</script>")   # stale token: router ignores
             todo = f.get("todo")
+            if f.get("this_file") == "LAN_lan.htm":   # Edit/Delete post the whole LAN Setup form
+                bad = {k: f.get(k) for k, v in {**{k: v for k, v in LAN.items() if k.startswith("c4_") or k in ("device_name", "h_dhcp_server", "h_wds", "h_apmode")}, **LAN_POSTED}.items() if f.get(k) != v}
+                if bad or f.get("ruleSelect") != f.get("h_ruleSelect"):
+                    print("LAN FORM MISMATCH", bad, flush=True)
+                    return self.html("<script>alert('LAN form mismatch')</script>")
+                n = int(f["ruleSelect"])
+                if todo == "delete": RESERVED.pop(n); return self.html(self.lan_page())
+                if todo == "edit": global EDITING; EDITING = n; return self.html(self.rsv_page("LAN_reserv_edit.htm", RESERVED[n]))
+            if f.get("this_file") in ("LAN_reserv_add.htm", "LAN_reserv_edit.htm") and todo == "save":
+                ip = ".".join(f[f"rsv_ip{k}"] for k in range(1, 5))
+                if ip != f.get("c4_rsv_ip"): return self.html("<script>alert('ip mismatch')</script>")
+                r = {"ip": ip, "name": f["dv_name"], "mac": f["rsv_mac"].upper()}
+                if f["this_file"] == "LAN_reserv_edit.htm":
+                    if f.get("edit") != "1" or f.get("h_ruleSelect") != str(EDITING) or "apply" not in f: return self.html("<script>alert('edit form mismatch')</script>")
+                    RESERVED[EDITING] = r
+                else:
+                    RESERVED[:] = [x for x in RESERVED if x["ip"] != r["ip"] and x["mac"] != r["mac"]] + [r]
+                return self.html(self.lan_page())
             if todo == "edit":
                 n = int(f["ruleSelect"]); r = RULES[n-1]
                 return self.html(self.fw_service_page(r, n))

@@ -132,6 +132,16 @@ api.MapPut("/portforwards/{n:int}", (int n, PortForwardInput input, RouterServic
 api.MapDelete("/portforwards/{n:int}", (int n, RouterService r, CancellationToken ct) =>
     Guard(async () => Results.Ok(await r.DeletePortForwardAsync(n, ct))));
 
+// ───── DHCP reservations (LAN Setup) ─────
+api.MapGet("/dhcp", (RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.GetDhcpAsync(ct))));
+api.MapPost("/dhcp/reservations", (ReservationInput input, RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.SaveReservationAsync(null, input, ct))));
+api.MapPut("/dhcp/reservations/{n:int}", (int n, ReservationInput input, RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.SaveReservationAsync(n, input, ct))));
+api.MapDelete("/dhcp/reservations/{n:int}", (int n, string? mac, RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.DeleteReservationAsync(n, mac, ct))));
+
 api.MapPost("/reboot", (RouterService r, CancellationToken ct) =>
     Guard(async () => await r.RebootAsync(ct) ? Results.Ok() : Results.Problem("Reboot request failed.")));
 

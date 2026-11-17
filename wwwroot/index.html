@@ -56,6 +56,7 @@
     <nav class="tabs" id="tabs">
       <button data-tab="overview" class="on">😺 Overview</button>
       <button data-tab="ports">🚪 Port forwarding</button>
+      <button data-tab="dhcp">🧺 DHCP reservations</button>
     </nav>
 
     <div id="banner" class="banner" hidden></div>
@@ -102,6 +103,21 @@
         </div>
         <p class="muted small pf-blurb">A cat flap lets the outside world reach a device at home. Any stray on the internet can push through, so only open the flaps you need. 🔐</p>
         <div id="pfList" class="pf-list"></div>
+      </section>
+    </div>
+
+    <div class="tabpane" data-pane="dhcp" hidden>
+      <section class="glass ports eared">
+        <div class="dev-head">
+          <h2>DHCP reservations <span class="count" id="rsvCount"></span> <span class="muted small h-sub"><i class="paw"></i> every cat gets its own basket</span></h2>
+          <div class="dev-tools">
+            <button class="btn ghost" id="rsvReload">🧶 Reload</button>
+            <button class="btn primary" id="rsvAdd"><i class="paw"></i> Reserve an address</button>
+          </div>
+        </div>
+        <p class="muted small pf-blurb">A reservation tells the router to always hand a device the same IP address, so port forwarding rules and bookmarks keep pointing at it.</p>
+        <div id="rsvInfo" class="rsv-info"></div>
+        <div id="rsvList" class="pf-list"></div>
       </section>
     </div>
 
