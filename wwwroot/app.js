@@ -166,6 +166,7 @@ function render() {
   renderDevices();
   if (ui.pf) renderPf(); // rules may have loaded before the device list they link to
   if (ui.dhcp) renderDhcp();
+  if (ui.logs) renderLogs(); // device names in the log come from the snapshot
   tick();
 }
 
@@ -404,6 +405,8 @@ document.addEventListener("click", async e => {
   else if (t.dataset.pfDel) pfDelete(+t.dataset.pfDel);
   else if (t.id === "rsvReload") loadDhcp();
   else if (t.id === "wlReload") loadWifi();
+  else if (t.id === "stReload") loadLogsStatus();
+  else if (t.dataset.logFilter) { ui.logFilter = t.dataset.logFilter; renderLogs(); }
   else if (t.dataset.wlPeek) peekWifiPw(t);
   else if (t.id === "rsvAdd") rsvEdit(null);
   else if (t.dataset.rsvEdit) rsvEdit(+t.dataset.rsvEdit);
@@ -519,6 +522,7 @@ function setTab(tab) {
   if (tab === "ports" && !ui.pf) loadPf();
   if (tab === "dhcp" && !ui.dhcp) loadDhcp();
   if (tab === "wifi" && !ui.wl) loadWifi();
+  if (tab === "logs" && !ui.logs) loadLogsStatus();
 }
 
 // ───────────────────────── port forwarding ─────────────────────────
@@ -913,6 +917,115 @@ async function saveWifi(ev) {
     btn.disabled = false; btn.innerHTML = `<i class="paw"></i> Save Wi-Fi settings`;
   }
 }
+
+// ───────────────────────── logs & status (read-only) ─────────────────────────
+ui.logFilter = "all";
+const LOG_STYLE = {
+  "Access Control": ["🚪", "var(--g5)"], "LAN access from remote": ["🌍", "var(--g24)"], "admin login": ["🔑", "var(--gbrand)"],
+  "Internet connected": ["😺", "var(--gwired)"], "Internet disconnected": ["🙀", "linear-gradient(135deg,#fb7185,#e11d48)"],
+  DHCP: ["🧺", "var(--gwired)"], "Time synchronized with NTP server": ["⏰", "var(--gunk)"],
+};
+const logStyle = cat => LOG_STYLE[cat] || (cat.startsWith("DHCP") ? LOG_STYLE.DHCP : ["🐾", "var(--gunk)"]);
+const logCat = cat => cat.startsWith("DHCP") ? "DHCP" : cat || "Other";
+const isRoutine = e => e.category === "Access Control" && /is allowed to acces/.test(e.message);
+
+// "86:30:46" (hours:min:sec) → "3d 14h 30m"
+function fmtUp(s) {
+  const m = /^(\d+):(\d+):(\d+)$/.exec(s || "");
+  if (!m) return s || "—";
+  const h = +m[1], d = Math.floor(h / 24);
+  return [d && `${d}d`, `${h % 24}h`, `${+m[2]}m`].filter(Boolean).join(" ");
+}
+const fmtRate = v => v == null ? "—" : v >= 1e6 ? (v / 1e6).toFixed(1) + " M" : v >= 1e3 ? (v / 1e3).toFixed(1) + " k" : String(v);
+const fmtCount = v => v == null ? "—" : v.toLocaleString();
+
+async function loadLogsStatus() {
+  $("#stPorts").innerHTML = $("#logList").innerHTML = `<div class="empty"><span class="spin">🧶</span> Reading the cat's diary…</div>`;
+  const [st, logs] = await Promise.allSettled([api("/router-status"), api("/logs")]);
+  if (st.status === "fulfilled") { ui.rstatus = st.value; renderStatus(); }
+  else $("#stPorts").innerHTML = `<div class="empty">🙀 ${esc(st.reason.message)}</div>`;
+  if (logs.status === "fulfilled") { ui.logs = logs.value; renderLogs(); }
+  else $("#logList").innerHTML = `<div class="empty">🙀 ${esc(logs.reason.message)}</div>`;
+}
+
+function renderStatus() {
+  const s = ui.rstatus, wan = s.ports.find(p => p.port === "WAN"), c = s.connection || {};
+  const tiles = [
+    { g: "var(--gbrand)", label: "Router awake for", emoji: "😼", value: fmtUp(s.systemUpTime), sub: "since its last nap (reboot)" },
+    { g: "var(--g24)", label: "Internet link up for", emoji: "🌍", value: fmtUp(wan?.upTime), sub: wan ? `WAN ${wan.status}` : "" },
+    c["Lease Expires"] && { g: "var(--g5)", label: "IP lease renews in", emoji: "⏳", value: c["Lease Expires"].replace(/(\d+) days?,\s*/, (_, d) => +d ? `${d}d ` : "").replace(/ hrs?,\s*/, "h ").replace(/ minutes?/, "m"), sub: c["IP Address"] ? `public IP ${c["IP Address"]}` : "" },
+  ].filter(Boolean);
+  $("#stTiles").innerHTML = tiles.map(x => `
+    <div class="tile" style="--g:${x.g}">
+      <div class="label"><span>${x.label}</span><span class="emoji">${x.emoji}</span></div>
+      <div class="value st-value">${esc(x.value)}</div>
+      <div class="sub">${esc(x.sub)}</div>
+    </div>`).join("");
+  const g = p => p.port === "WAN" ? "var(--g24)" : p.port.startsWith("LAN") ? "var(--gwired)" : p.port.startsWith("2.4") ? "var(--g24)" : p.port.startsWith("5") ? "var(--g5)" : "var(--gunk)";
+  const icon = p => p.port === "WAN" ? "🌍" : p.port.startsWith("LAN") ? "🐭" : "📶";
+  $("#stPorts").innerHTML = s.ports.map((p, i) => {
+    const down = /down/i.test(p.status);
+    return `
+    <article class="dev st-port ${down ? "blocked" : ""}" style="--g:${g(p)}; animation-delay:${i * 30}ms">
+      <div class="dev-top"><div class="icon">${icon(p)}</div>
+        <div class="dev-name"><div class="n"><span>${esc(p.port)}</span></div><div class="orig">${down ? "💤 nothing plugged in" : esc(p.status)}</div></div></div>
+      ${down ? "" : `<dl class="kv">
+        <dt>Now ↑ / ↓</dt><dd class="mono">${fmtRate(p.txBps)} / ${fmtRate(p.rxBps)} B/s</dd>
+        <dt>Packets ↑ / ↓</dt><dd class="mono">${fmtCount(p.txPkts)} / ${fmtCount(p.rxPkts)}</dd>
+        <dt>Up for</dt><dd>${esc(fmtUp(p.upTime))}</dd>
+        ${p.collisions ? `<dt>Collisions</dt><dd>${fmtCount(p.collisions)}</dd>` : ""}
+      </dl>`}
+    </article>`;
+  }).join("") + (Object.keys(c).length ? `
+    <article class="dev st-port" style="--g:var(--gbrand)">
+      <div class="dev-top"><div class="icon">🔌</div><div class="dev-name"><div class="n"><span>Internet connection</span></div><div class="orig">from your provider</div></div></div>
+      <dl class="kv">${Object.entries(c).map(([k, v]) => `<dt>${esc(k)}</dt><dd class="${/IP|Mask|Gateway|Server/.test(k) ? "mono" : ""}">${esc(v)}</dd>`).join("")}</dl>
+    </article>` : "");
+}
+
+// Put names on MACs and IPs the log mentions, and the port-forward rule a remote hit used.
+function decorateLog(msg) {
+  let h = esc(msg);
+  h = h.replace(/\b([0-9A-F]{2}(?::[0-9A-F]{2}){5})\b/gi, mac => {
+    const d = deviceByMac(mac);
+    return d ? `<b title="${esc(mac)}">${deviceIcon(d)} ${esc(labelFor(d) || d.name)}</b>` : `<span class="mono">${mac}</span>`;
+  });
+  h = h.replace(/\b(192\.168\.\d+\.\d+)(?::(\d+))?\b/g, (all, ip, port) => {
+    const d = ui.snap?.devices.find(x => x.ip === ip);
+    const rule = port && ui.pf?.find(r => r.ip === ip && (r.externalPorts.split(",").some(x => { const [a, b] = x.split("-").map(Number); return +port >= a && +port <= (b || a); })
+      || r.internalPorts.split(",").some(x => { const [a, b] = x.split("-").map(Number); return +port >= a && +port <= (b || a); })));
+    return `${d ? `<b title="${ip}">${deviceIcon(d)} ${esc(labelFor(d) || d.name)}</b>` : `<span class="mono">${ip}</span>`}${port ? `<span class="mono">:${port}</span>` : ""}${rule ? ` <span class="badge" title="Port forwarding rule">🚪 ${esc(rule.name)}</span>` : ""}`;
+  });
+  return h;
+}
+
+function renderLogs() {
+  const all = ui.logs || [];
+  const quiet = $("#logQuiet").checked;
+  const base = all.filter(e => !(quiet && isRoutine(e)));
+  const counts = {};
+  for (const e of base) counts[logCat(e.category)] = (counts[logCat(e.category)] || 0) + 1;
+  if (ui.logFilter !== "all" && !counts[ui.logFilter]) ui.logFilter = "all";
+  $("#logChips").innerHTML = [["all", `All`, "var(--gbrand)", base.length], ...Object.entries(counts).sort((a, b) => b[1] - a[1]).map(([k, n]) => [k, `${logStyle(k)[0]} ${k}`, logStyle(k)[1], n])]
+    .map(([k, label, g, n]) => `<button class="chip ${ui.logFilter === k ? "on" : ""}" style="--g:${g}" data-log-filter="${esc(k)}">${esc(label)}<span class="n">${n}</span></button>`).join("");
+  const q = ($("#logSearch").value || "").trim().toLowerCase();
+  const list = base.filter(e => (ui.logFilter === "all" || logCat(e.category) === ui.logFilter) && (!q || `${e.category} ${e.message}`.toLowerCase().includes(q)));
+  $("#logCount").textContent = all.length;
+  const hidden = all.length - base.length;
+  $("#logList").innerHTML = (list.length ? list.slice(0, 400).map(e => {
+    const [emo, g] = logStyle(e.category);
+    const t = e.time ? new Date(e.time) : null;
+    return `<div class="log-row" style="--g:${g}">
+      <span class="log-time mono" title="${esc(e.time || "")}">${t ? t.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "—"}</span>
+      <span class="log-cat">${emo} ${esc(e.category || "Other")}</span>
+      <span class="log-msg">${decorateLog(e.message)}</span>
+    </div>`;
+  }).join("") : `<div class="empty">🙀 Nothing matches. The diary is quiet.</div>`)
+    + (hidden && quiet ? `<div class="muted small log-foot">${hidden} routine “device is allowed” entries hidden.</div>` : "");
+}
+
+$("#logSearch").addEventListener("input", () => renderLogs());
+$("#logQuiet").addEventListener("change", () => renderLogs());
 
 // ───────────────────────── modal helpers ─────────────────────────
 function modal(html) {

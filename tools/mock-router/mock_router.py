@@ -1,7 +1,7 @@
 """
 Fake Netgear R6350 for testing PurrRouter without a real router.
 
-Speaks the SOAP API (port 8099) and the web pages PurrRouter uses (Attached Devices, Port Forwarding, LAN Setup reservations).
+Speaks the SOAP API (port 8099) and the web pages PurrRouter uses (Attached Devices, Port Forwarding, LAN Setup reservations, Wireless Setup, Logs, Router Status).
 Login: admin / test.   Flags:
   --r6350   mimic R6350 firmware quirks (drops GetAttachDevice2, junk "BLOCK 44" header, no band info in SOAP)
   --xsrf    web pages want a token cookie handed out on the first 401
@@ -206,8 +206,37 @@ function print_all_reserve()
             return '<html><body><form method="POST" action="setup.cgi?id=adv"><input type="hidden" name="h_enable_ap" value="enable"><input type="hidden" name="h_enable_ap_an" value="enable"></form></body></html>'
         return None
 
+    def admin_pages(self, path):
+        if path.startswith("/FW_log.htm"):
+            lines = ["[admin login] from source 192.168.1.23 Monday, November 16,2026 20:26:20",
+                     "[Access Control] Device THERMOSTAT with MAC address 44:11:22:33:44:05 is allowed to acces Monday, November 16,2026 20:24:40",
+                     "[LAN access from remote] from 198.51.100.7:25728 to 192.168.1.10:8080 Monday, November 16,2026 20:24:23",
+                     "[DHCP IP: (192.168.1.43)] to MAC address EE:11:22:33:44:08, Monday, November 16,2026 20:20:01",
+                     "[Internet connected] IP address: 203.0.113.10, Monday, November 16,2026 08:00:00",
+                     "[Time synchronized with NTP server] Monday, November 16,2026 07:59:58",
+                     "[Access Control] Device UNKNOWN with MAC address 90:1"]
+            return '<html><body><form action="setup.cgi?id=log"><textarea name="log_detail" readonly>' + "\n".join(l + "        " for l in lines) + "</textarea></form></body></html>"
+        if path.startswith("/RST_stattbl.htm"):
+            row = lambda *c: "<tr>" + "".join(f"<td>{x}</td>" for x in c) + "</tr>"
+            return ("<html><body><table>" + row("System Up Time", "52:10:07") + row("Port", "Status", "TxPkts", "RxPkts", "Collisions", "Tx B/s", "Rx B/s", "Up Time")
+                    + row("WAN", "1000M/Full", "1200", "3400", "0", "5000", "16000", "50:00:01") + row("LAN 1", "1000M/Full", "100", "200", "0", "20", "30", "52:09:50")
+                    + row("LAN 2", "Link down", "--") + row("2.4G WLAN b/g/n", "300M", "10", "20", "0", "1", "2", "52:10:00") + row("5G WLAN a/n/ac", "1733M", "10", "20", "0", "1", "2", "52:10:00")
+                    + "</table></body></html>")
+        if path.startswith("/RST_wanstat.htm"):
+            return '<html><head><meta http-equiv="REFRESH" content="0; URL= setup.cgi?next_file=RST_st_dhcp.htm"></head><body></body></html>'
+        if path.startswith("/setup.cgi?next_file=RST_st_dhcp.htm"):
+            row = lambda a, b: f"<tr><td>{a}</td><td>{b}</td></tr>"
+            return ("<html><body><table>" + row("IP Address", "203.0.113.10") + row("Subnet Mask", "255.255.252.0") + row("Default Gateway", "203.0.113.1")
+                    + row("DHCP Server :", "203.0.113.2") + row("DNS Server :", "75.75.75.75 75.75.76.76") + row("Lease Obtained", "0 days,3 hrs,0 minutes")
+                    + row("Lease Expires", "0 days,21 hrs,0 minutes") + "</table></body></html>")
+        return None
+
     def do_GET(self):
         import base64
+        if self.path.startswith(("/FW_log.htm", "/RST_", "/setup.cgi?next_file=RST_")):
+            if not self.web_auth_ok(): return self.html("", 401)
+            page = self.admin_pages(self.path)
+            if page is not None: return self.html(page)
         if self.path.startswith("/WLG_"):
             if not self.web_auth_ok(): return self.html("", 401)
             page = self.wl_pages(self.path)

@@ -22,6 +22,9 @@ pages, which are more likely to differ between models.
 - ⛔ **Block / allow** devices (Netgear Access Control)
 - 🚪 **Port forwarding**: list, add, edit, delete rules, picking the target from your devices
 - 🧺 **DHCP address reservations** (LAN Setup): list, add, edit, delete; pick the device, see who's using each address
+- 📶 **Wi-Fi settings** (Wireless Setup): network name, password, channel and name broadcast for each band
+- 📜 **Logs & status**: the router's log with device names filled in, uptime, per-port traffic, internet lease info
+- 🐾 Very cat-themed (click the logo)
 - 📶 Both Wi-Fi bands: SSID, channel, mode, show/copy the Wi-Fi password, guest network on/off
 - 🌍 Internet status, public IP, DNS, gateway; traffic meter (today / this month)
 - ⏱️ Adjustable auto-refresh; ⏻ reboot button

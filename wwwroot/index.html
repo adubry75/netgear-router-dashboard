@@ -58,6 +58,7 @@
       <button data-tab="ports">🚪 Port forwarding</button>
       <button data-tab="dhcp">🧺 DHCP reservations</button>
       <button data-tab="wifi">📶 Wi-Fi settings</button>
+      <button data-tab="logs">📜 Logs &amp; status</button>
     </nav>
 
     <div id="banner" class="banner" hidden></div>
@@ -132,6 +133,28 @@
         </div>
         <p class="muted small pf-blurb">Changing anything here restarts the router's Wi-Fi: every wireless device drops off for a moment, and if you change a name or password they'll need the new one.</p>
         <form id="wlForm" class="wl-grid" autocomplete="off"></form>
+      </section>
+    </div>
+
+    <div class="tabpane" data-pane="logs" hidden>
+      <section class="tiles" id="stTiles"></section>
+      <section class="glass ports eared">
+        <div class="dev-head">
+          <h2>Ports <span class="muted small h-sub"><i class="paw"></i> every door the cats use</span></h2>
+          <div class="dev-tools"><button class="btn ghost" id="stReload">🧶 Reload</button></div>
+        </div>
+        <div id="stPorts" class="st-ports"></div>
+      </section>
+      <section class="glass ports eared">
+        <div class="dev-head">
+          <h2>Router log <span class="count" id="logCount"></span> <span class="muted small h-sub"><i class="paw"></i> the cat's diary</span></h2>
+          <div class="dev-tools">
+            <div class="chips" id="logChips"></div>
+            <input id="logSearch" class="search" placeholder="👃  Sniff the log…" />
+            <label class="check small"><input type="checkbox" id="logQuiet" checked> Hide routine “allowed” pings</label>
+          </div>
+        </div>
+        <div id="logList" class="log-list"></div>
       </section>
     </div>
 

@@ -139,6 +139,12 @@ api.MapPut("/portforwards/{n:int}", (int n, PortForwardInput input, RouterServic
 api.MapDelete("/portforwards/{n:int}", (int n, RouterService r, CancellationToken ct) =>
     Guard(async () => Results.Ok(await r.DeletePortForwardAsync(n, ct))));
 
+// ───── Administration: logs & status (read-only) ─────
+api.MapGet("/logs", (RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.GetLogsAsync(ct))));
+api.MapGet("/router-status", (RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.GetRouterStatusAsync(ct))));
+
 // ───── Wi-Fi settings (Wireless Setup) ─────
 api.MapGet("/wifi/settings", (RouterService r, CancellationToken ct) =>
     Guard(async () => Results.Ok(await r.GetWifiSettingsAsync(ct))));

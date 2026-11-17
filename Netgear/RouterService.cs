@@ -253,6 +253,11 @@ public sealed class RouterService(SettingsStore store, ILogger<RouterService> lo
         return string.Join(",", output);
     }
 
+    // ───────────────────────── logs & status (read-only) ─────────────────────────
+
+    public Task<List<LogEntry>> GetLogsAsync(CancellationToken ct) => Client.GetLogsAsync(ct);
+    public Task<RouterStatus> GetRouterStatusAsync(CancellationToken ct) => Client.GetRouterStatusAsync(ct);
+
     // ───────────────────────── Wi-Fi settings ─────────────────────────
 
     public Task<WifiSettings> GetWifiSettingsAsync(CancellationToken ct) => Client.GetWifiSettingsAsync(ct);
