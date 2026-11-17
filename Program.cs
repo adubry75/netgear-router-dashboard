@@ -39,7 +39,11 @@ app.Use(async (ctx, next) =>
 });
 
 app.UseDefaultFiles();   // "/" → "/index.html"
-app.UseStaticFiles();    // plain static files: works from dotnet run, a built DLL, or a publish
+app.UseStaticFiles(new StaticFileOptions // plain static files: works from dotnet run, a built DLL, or a publish
+{
+    // Revalidate every load (cheap 304s on localhost) so an updated app.js/app.css never shows up stale.
+    OnPrepareResponse = c => c.Context.Response.Headers.CacheControl = "no-cache",
+});
 
 var api = app.MapGroup("/api");
 

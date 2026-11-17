@@ -4,18 +4,20 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>PurrRouter</title>
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>📡</text></svg>" />
+  <link rel="icon" href="logo.svg" type="image/svg+xml" />
   <link rel="stylesheet" href="app.css" />
 </head>
 <body>
   <div class="orbs" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+  <div class="paws" aria-hidden="true"></div>
+  <div class="stroller" aria-hidden="true"><span>🐈</span></div>
 
   <!-- ───────── Setup ───────── -->
   <main id="setup" class="setup" hidden>
-    <form id="setupForm" class="glass setup-card" autocomplete="off">
-      <img class="logo-img big" src="logo.svg" alt="" />
+    <form id="setupForm" class="glass setup-card eared" autocomplete="off">
+      <img class="logo-img big pet-me" src="logo.svg" alt="" title="Pet me" />
       <h1>PurrRouter</h1>
-      <p class="muted">Sign in to your router once. Your password is encrypted on this PC.</p>
+      <p class="muted">Meow! Sign in to your router once. Your password is encrypted on this PC. <i class="paw"></i></p>
 
       <label>Router address <input name="host" value="192.168.1.1" required /></label>
       <label>Username <input name="username" value="admin" required /></label>
@@ -30,7 +32,7 @@
       </details>
 
       <p id="setupError" class="error" hidden></p>
-      <button class="btn primary wide" type="submit"><span>Connect</span></button>
+      <button class="btn primary wide" type="submit"><span><i class="paw"></i> Connect</span></button>
     </form>
   </main>
 
@@ -38,7 +40,7 @@
   <main id="dash" class="dash" hidden>
     <header class="top">
       <div class="brand">
-        <img class="logo-img" src="logo.svg" alt="PurrRouter" />
+        <img class="logo-img pet-me" src="logo.svg" alt="PurrRouter" title="Pet me" />
         <div>
           <h1 id="routerName">Router</h1>
           <div class="muted small" id="routerMeta"></div>
@@ -46,13 +48,13 @@
       </div>
       <div class="top-actions">
         <span id="netPill" class="pill"></span>
-        <button class="btn ghost" id="refreshBtn" title="Refresh now">⟳ <span class="hide-sm">Refresh</span></button>
-        <button class="btn ghost" id="settingsBtn" title="Settings">⚙</button>
+        <button class="btn ghost" id="refreshBtn" title="Refresh now">🧶 <span class="hide-sm">Refresh</span></button>
+        <button class="btn ghost" id="settingsBtn" title="Settings">⚙️</button>
       </div>
     </header>
 
     <nav class="tabs" id="tabs">
-      <button data-tab="overview" class="on">🏠 Overview</button>
+      <button data-tab="overview" class="on">😺 Overview</button>
       <button data-tab="ports">🚪 Port forwarding</button>
     </nav>
 
@@ -66,12 +68,12 @@
       <div class="wifi-wrap" id="wifiPanels"></div>
     </section>
 
-    <section class="glass devices">
+    <section class="glass devices eared">
       <div class="dev-head">
-        <h2>Connected devices <span class="count" id="devCount"></span></h2>
+        <h2>Connected devices <span class="count" id="devCount"></span> <span class="muted small h-sub"><i class="paw"></i> the whole litter</span></h2>
         <div class="dev-tools">
           <div class="chips" id="chips"></div>
-          <input id="search" class="search" placeholder="🔎  Search name, IP, MAC…" />
+          <input id="search" class="search" placeholder="👃  Sniff out a name, IP, MAC…" />
           <select id="sort" class="select" title="Sort">
             <option value="ip">Sort: IP</option>
             <option value="name">Sort: Name</option>
@@ -90,15 +92,15 @@
     </div>
 
     <div class="tabpane" data-pane="ports" hidden>
-      <section class="glass ports">
+      <section class="glass ports eared">
         <div class="dev-head">
-          <h2>Port forwarding <span class="count" id="pfCount"></span></h2>
+          <h2>Port forwarding <span class="count" id="pfCount"></span> <span class="muted small h-sub"><i class="paw"></i> cat flaps to the internet</span></h2>
           <div class="dev-tools">
-            <button class="btn ghost" id="pfReload">⟳ Reload</button>
-            <button class="btn primary" id="pfAdd">＋ Add rule</button>
+            <button class="btn ghost" id="pfReload">🧶 Reload</button>
+            <button class="btn primary" id="pfAdd"><i class="paw"></i> Add rule</button>
           </div>
         </div>
-        <p class="muted small pf-blurb">Lets the outside world reach a device at home. Anyone on the internet can hit these ports, so only forward what you need. 🔐</p>
+        <p class="muted small pf-blurb">A cat flap lets the outside world reach a device at home. Any stray on the internet can push through, so only open the flaps you need. 🔐</p>
         <div id="pfList" class="pf-list"></div>
       </section>
     </div>
@@ -115,12 +117,13 @@
           </select>
         </label>
       </span>
-      <button class="btn danger" id="rebootBtn">⏻ Reboot router</button>
+      <span class="purr muted small">made with <i class="paw"></i> and purrs</span>
+      <button class="btn danger" id="rebootBtn">😴 Reboot router</button>
     </footer>
   </main>
 
   <!-- ───────── Modal + toasts ───────── -->
-  <dialog id="modal" class="glass modal"><form method="dialog" id="modalForm"></form></dialog>
+  <dialog id="modal" class="glass modal eared"><form method="dialog" id="modalForm"></form></dialog>
   <div id="toasts" class="toasts"></div>
 
   <script src="app.js"></script>

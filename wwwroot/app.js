@@ -21,8 +21,8 @@ const ui = {
 
 const BANDS = {
   "5": { label: "5 GHz", g: "var(--g5)", emoji: "⚡" },
-  "2.4": { label: "2.4 GHz", g: "var(--g24)", emoji: "🔥" },
-  wired: { label: "Wired", g: "var(--gwired)", emoji: "🔗" },
+  "2.4": { label: "2.4 GHz", g: "var(--g24)", emoji: "🧶" },
+  wired: { label: "Wired", g: "var(--gwired)", emoji: "🐭" },
   wireless: { label: "Wi-Fi", g: "linear-gradient(135deg,#38bdf8,#f472b6)", emoji: "📶" },
   unknown: { label: "Unknown", g: "var(--gunk)", emoji: "❔" },
 };
@@ -68,7 +68,7 @@ $("#setupForm").addEventListener("submit", async e => {
   const f = e.target, btn = f.querySelector("button"), err = $("#setupError");
   err.hidden = true;
   btn.disabled = true;
-  btn.innerHTML = `<span class="spin">⟳</span> Connecting…`;
+  btn.innerHTML = `<span class="spin">🧶</span> Connecting…`;
   try {
     await api("/setup", {
       method: "POST",
@@ -84,7 +84,7 @@ $("#setupForm").addEventListener("submit", async e => {
     err.hidden = false;
   } finally {
     btn.disabled = false;
-    btn.innerHTML = "<span>Connect</span>";
+    btn.innerHTML = `<span><i class="paw"></i> Connect</span>`;
   }
 });
 
@@ -110,9 +110,9 @@ function tick() {
   if (!ui.snap || !el) return;
   const at = new Date(ui.snap.fetchedAt).toLocaleTimeString();
   const left = Math.max(0, Math.ceil((ui.nextAt - Date.now()) / 1000));
-  el.textContent = ui.loading ? `Updated ${at} · refreshing now…`
-    : ui.refreshSec === 0 ? `Updated ${at}`
-    : `Updated ${at} · next in ${left >= 60 ? `${Math.floor(left / 60)}m ${left % 60}s` : `${left}s`}`;
+  el.innerHTML = ui.loading ? `<i class="paw"></i> Last sniffed ${at} · sniffing around now…`
+    : ui.refreshSec === 0 ? `<i class="paw"></i> Last sniffed ${at}`
+    : `<i class="paw"></i> Last sniffed ${at} · next sniff in ${left >= 60 ? `${Math.floor(left / 60)}m ${left % 60}s` : `${left}s`}`;
   if (ui.refreshSec > 0 && !ui.loading && !document.hidden && Date.now() >= ui.nextAt) load(false);
 }
 
@@ -136,7 +136,7 @@ async function load(force) {
 async function loadCore(force) {
   const btn = $("#refreshBtn");
   btn.disabled = true;
-  btn.innerHTML = `<span class="spin">⟳</span> <span class="hide-sm">Refresh</span>`;
+  btn.innerHTML = `<span class="spin">🧶</span> <span class="hide-sm">Refresh</span>`;
   try {
     ui.snap = await api("/snapshot" + (force ? "?force=true" : ""));
     $("#banner").hidden = true;
@@ -144,10 +144,10 @@ async function loadCore(force) {
   } catch (ex) {
     if (ex.status === 401 || ex.status === 409) return showSetup(await api("/status"));
     const b = $("#banner");
-    b.textContent = `⚠ ${ex.message} Showing the last data I had.`;
+    b.textContent = `🙀 ${ex.message} Showing the last data I had.`;
     b.hidden = false;
   } finally {
-    btn.innerHTML = `⟳ <span class="hide-sm">Refresh</span>`;
+    btn.innerHTML = `🧶 <span class="hide-sm">Refresh</span>`;
     btn.disabled = false;
   }
 }
@@ -160,6 +160,7 @@ function render() {
   renderWan(s);
   renderWifi(s);
   renderDevices();
+  if (ui.pf) renderPf(); // rules may have loaded before the device list they link to
   tick();
 }
 
@@ -172,7 +173,7 @@ function renderHeader(s) {
   const up = isUp(s);
   const pill = $("#netPill");
   pill.className = "pill" + (up === false ? " down" : "");
-  pill.textContent = up === false ? "Internet down" : up ? "Internet up" : "Internet ?";
+  pill.textContent = up === false ? "🙀 Internet down" : up ? "😺 Internet up" : "😼 Internet ?";
 }
 
 function isUp(s) {
@@ -186,14 +187,14 @@ function renderTiles(s) {
   const n = b => d.filter(x => x.band === b).length;
   const t = s.traffic;
   const tiles = [
-    { g: "var(--gbrand)", label: "Devices online", emoji: "🛰️", value: d.length, sub: `${d.filter(x => isBlocked(x)).length} blocked · ${d.filter(x => x.isNew).length} new` },
-    { g: "var(--g24)", label: "2.4 GHz", emoji: "🔥", value: n("2.4"), sub: "long range" },
-    { g: "var(--g5)", label: "5 GHz", emoji: "⚡", value: n("5"), sub: "fast lane" },
-    { g: "var(--gwired)", label: "Wired", emoji: "🔗", value: n("wired"), sub: "plugged in" },
+    { g: "var(--gbrand)", label: "Devices online", emoji: "🐈", value: d.length, sub: `${d.filter(x => isBlocked(x)).length} blocked · ${d.filter(x => x.isNew).length} new` },
+    { g: "var(--g24)", label: "2.4 GHz", emoji: "🧶", value: n("2.4"), sub: "long-range prowl" },
+    { g: "var(--g5)", label: "5 GHz", emoji: "⚡", value: n("5"), sub: "zoomies lane" },
+    { g: "var(--gwired)", label: "Wired", emoji: "🐭", value: n("wired"), sub: "tail plugged in" },
   ];
   if (t?.enabled && (t.today.downMb != null || t.month.downMb != null)) {
-    tiles.push({ g: "linear-gradient(135deg,#60a5fa,#6366f1)", label: "Today", emoji: "📶", value: mb(t.today.downMb), sub: `↓ down · ↑ ${mb(t.today.upMb)} up` });
-    tiles.push({ g: "linear-gradient(135deg,#c084fc,#db2777)", label: "This month", emoji: "📅", value: mb(t.month.downMb), sub: `↓ down · ↑ ${mb(t.month.upMb)} up` });
+    tiles.push({ g: "linear-gradient(135deg,#60a5fa,#6366f1)", label: "Today", emoji: "🐟", value: mb(t.today.downMb), sub: `↓ down · ↑ ${mb(t.today.upMb)} up` });
+    tiles.push({ g: "linear-gradient(135deg,#c084fc,#db2777)", label: "This month", emoji: "🥫", value: mb(t.month.downMb), sub: `↓ down · ↑ ${mb(t.month.upMb)} up` });
   }
   $("#tiles").innerHTML = tiles.map(x => `
     <div class="tile" style="--g:${x.g}">
@@ -213,7 +214,7 @@ function renderWan(s) {
     ["Serial", s.router.serial], ["In service since", s.router.firstUse],
   ].filter(r => r[1]);
   $("#wanPanel").innerHTML = `
-    <h3>🌍 Internet & network</h3>
+    <h3>🏡 Internet & network <span class="muted small">· home turf</span></h3>
     <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd class="${/IP|Gateway|DNS|Subnet/.test(k) ? "mono" : ""}">${esc(v)}</dd>`).join("")}</dl>`;
 }
 
@@ -235,12 +236,12 @@ function renderWifi(s) {
       <div class="pw">
         <span class="mono" id="pw-${w.band.replace(".", "")}">••••••••••</span>
         <span>
-          <button class="btn sm" data-reveal="${w.band}">👁 Show</button>
+          <button class="btn sm" data-reveal="${w.band}">😼 Peek</button>
         </span>
       </div>
       ${w.guestEnabled == null ? "" : `
       <div class="guest">
-        <span>🧳 Guest network</span>
+        <span>🛋️ Guest network <span class="muted small">· for visiting cats</span></span>
         <label class="switch"><input type="checkbox" data-guest="${w.band}" ${w.guestEnabled ? "checked" : ""}><span></span></label>
       </div>`}
     </div>`;
@@ -280,7 +281,7 @@ function deviceIcon(d) {
   ];
   for (const [rx, e] of rules) if (rx.test(n)) return e;
   if (d.privateMac) return "📱"; // randomized MACs are almost always phones/tablets
-  return "✨";
+  return "🐱";
 }
 
 function signalBars(sig) {
@@ -316,9 +317,9 @@ function renderDevices() {
   const counts = { all: all.length, "5": 0, "2.4": 0, wired: 0, blocked: 0, new: 0 };
   for (const d of all) { counts[d.band] = (counts[d.band] || 0) + 1; if (isBlocked(d)) counts.blocked++; if (d.isNew) counts.new++; }
   const chips = [
-    ["all", "All", "var(--gbrand)"], ["2.4", "🔥 2.4 GHz", "var(--g24)"], ["5", "⚡ 5 GHz", "var(--g5)"],
-    ["wired", "🔗 Wired", "var(--gwired)"], ["blocked", "⛔ Blocked", "linear-gradient(135deg,#fb7185,#e11d48)"],
-    ["new", "✨ New", "linear-gradient(135deg,#f472b6,#a855f7)"],
+    ["all", "All", "var(--gbrand)"], ["2.4", "🧶 2.4 GHz", "var(--g24)"], ["5", "⚡ 5 GHz", "var(--g5)"],
+    ["wired", "🐭 Wired", "var(--gwired)"], ["blocked", "⛔ Blocked", "linear-gradient(135deg,#fb7185,#e11d48)"],
+    ["new", "🐈 New", "linear-gradient(135deg,#f472b6,#a855f7)"],
   ].filter(([k]) => k === "all" || counts[k] > 0 || ui.filter === k);
   $("#chips").innerHTML = chips.map(([k, label, g]) =>
     `<button class="chip ${ui.filter === k ? "on" : ""}" style="--g:${g}" data-filter="${k}">${label}<span class="n">${counts[k] || 0}</span></button>`).join("");
@@ -326,11 +327,11 @@ function renderDevices() {
   const fresh = all.filter(d => d.isNew);
   const nb = $("#newBar");
   nb.hidden = fresh.length === 0;
-  nb.innerHTML = fresh.length ? `<span>✨ <b>${fresh.length} new device${fresh.length > 1 ? "s" : ""}</b> joined since you last looked. Make sure you recognize ${fresh.length > 1 ? "them" : "it"}.</span>
-    <button class="btn sm" id="ackAll">👍 I know ${fresh.length > 1 ? "them" : "it"}</button>` : "";
+  nb.innerHTML = fresh.length ? `<span>🐈 <b>${fresh.length} new device${fresh.length > 1 ? "s" : ""}</b> wandered in since you last looked. Make sure you recognize ${fresh.length > 1 ? "them" : "it"}.</span>
+    <button class="btn sm" id="ackAll">😺 I know ${fresh.length > 1 ? "them" : "it"}</button>` : "";
 
   const list = filtered();
-  $("#devList").innerHTML = list.length ? list.map(deviceCard).join("") : `<div class="empty">No devices match. 🕵️</div>`;
+  $("#devList").innerHTML = list.length ? list.map(deviceCard).join("") : `<div class="empty">🙀 No devices match. Not a whisker in sight.</div>`;
 }
 
 function deviceCard(d, i) {
@@ -340,7 +341,7 @@ function deviceCard(d, i) {
   const label = labelFor(d);
   const badges = [
     `<span class="badge band">${b.label}</span>`,
-    d.isNew ? `<span class="badge new">NEW</span>` : "",
+    d.isNew ? `<span class="badge new">NEW KITTEN</span>` : "",
     blocked ? `<span class="badge blk">⛔ blocked</span>` : "",
     d.privateMac ? `<span class="badge" title="This device uses a randomized (private) MAC address">🎭 private MAC</span>` : "",
     d.ssid ? `<span class="badge">${esc(d.ssid)}</span>` : "",
@@ -350,6 +351,7 @@ function deviceCard(d, i) {
 
   return `
   <article class="dev ${blocked ? "blocked" : ""}" style="--g:${b.g}; animation-delay:${Math.min(i * 25, 400)}ms" data-mac="${esc(d.mac)}">
+    <i class="ears" aria-hidden="true"></i>
     <div class="dev-top">
       <div class="icon">${deviceIcon(d)}</div>
       <div class="dev-name">
@@ -368,7 +370,7 @@ function deviceCard(d, i) {
         d.linkRate ? `link ${esc(d.linkRate)} Mbps` : "",
       ].filter(Boolean).join(" · ")}</span></span>
       ${canBlock ? `<button class="btn sm ${blocked ? "" : "ghost"}" data-access="${esc(d.mac)}" data-allow="${blocked}" ${busy ? "disabled" : ""}>
-        ${busy ? `<span class="spin">⟳</span>` : blocked ? "✅ Allow" : "⛔ Block"}</button>` : ""}
+        ${busy ? `<span class="spin">🧶</span>` : blocked ? "✅ Allow" : "⛔ Block"}</button>` : ""}
     </div>
   </article>`;
 }
@@ -380,7 +382,7 @@ document.addEventListener("click", async e => {
 
   if (t.dataset.filter) { ui.filter = t.dataset.filter; localStorage.setItem("rd.filter", ui.filter); renderDevices(); }
   else if (t.dataset.view) setView(t.dataset.view);
-  else if (t.dataset.copy) { await navigator.clipboard.writeText(t.dataset.copy); toast(`Copied ${t.dataset.copy} 📋`, "ok"); }
+  else if (t.dataset.copy) { await navigator.clipboard.writeText(t.dataset.copy); toast(`📋 Pawed ${t.dataset.copy} onto your clipboard 😺`, "ok"); }
   else if (t.dataset.edit) editNickname(t.dataset.edit);
   else if (t.dataset.access) toggleAccess(t.dataset.access, t.dataset.allow === "true");
   else if (t.dataset.reveal) revealPassword(t, t.dataset.reveal);
@@ -403,7 +405,7 @@ document.addEventListener("change", async e => {
       want ? "Uses whatever guest SSID and password are set on the router." : "Anyone on the guest network will be disconnected.", want ? "Turn on" : "Turn off");
     if (!ok) { t.checked = !want; return; }
     t.disabled = true;
-    try { await api(`/wifi/${t.dataset.guest}/guest`, { method: "POST", body: { enabled: want } }); toast(`Guest network ${want ? "on" : "off"} 🧳`, "ok"); load(true); }
+    try { await api(`/wifi/${t.dataset.guest}/guest`, { method: "POST", body: { enabled: want } }); toast(`Guest network ${want ? "on: visitors welcome 🛋️" : "off: visitors shooed 🐈"}`, "ok"); load(true); }
     catch (ex) { t.checked = !want; toast(ex.message, "bad"); }
     finally { t.disabled = false; }
   }
@@ -422,11 +424,11 @@ function setView(v) {
 async function toggleAccess(mac, allow) {
   const d = ui.snap.devices.find(x => x.mac === mac);
   const name = labelFor(d) || d?.name || mac;
-  if (!allow && !(await confirmBox(`Block ${name}?`, "It'll be kicked off your network until you allow it again.", "⛔ Block", true))) return;
+  if (!allow && !(await confirmBox(`Block ${name}?`, "It'll be shooed off your network until you allow it again.", "⛔ Block", true))) return;
   ui.busy.add(mac); renderDevices();
   try {
     await api(`/devices/${encodeURIComponent(mac)}/access`, { method: "POST", body: { allow } });
-    toast(`${name} ${allow ? "allowed ✅" : "blocked ⛔"}`, "ok");
+    toast(`${name} ${allow ? "let back in 😺" : "shooed off the network ⛔"}`, "ok");
     ui.busy.delete(mac);
     ui.pendingAccess[mac] = { access: allow ? "Allow" : "Block", until: Date.now() + 120000 };
     renderDevices();
@@ -437,13 +439,13 @@ async function toggleAccess(mac, allow) {
 
 async function editNickname(mac) {
   const d = ui.snap.devices.find(x => x.mac === mac);
-  const name = await promptBox("Label this device", `${d?.name || "Unknown device"} · ${mac}`, labelFor(d) || "");
+  const name = await promptBox("🏷️ Give this device a name tag", `${d?.name || "Unknown device"} · ${mac}`, labelFor(d) || "");
   if (name === null) return;
   await api(`/devices/${encodeURIComponent(mac)}/nickname`, { method: "POST", body: { name } });
   // An auto-refresh may have swapped ui.snap while the dialog was open, so keep the label in an overlay too.
   ui.labels[mac] = name.trim() || null;
   renderDevices();
-  toast(name.trim() ? `Labeled “${name.trim()}” 🏷️` : "Label cleared", "ok");
+  toast(name.trim() ? `Name tag on: “${name.trim()}” 🏷️` : "Name tag removed", "ok");
 }
 
 function labelFor(d) {
@@ -462,7 +464,7 @@ async function acknowledgeAll() {
 async function revealPassword(btn, b) {
   const el = $(`#pw-${b.replace(".", "")}`);
   if (btn.dataset.shown) {
-    el.textContent = "••••••••••"; btn.textContent = "👁 Show"; delete btn.dataset.shown; return;
+    el.textContent = "••••••••••"; btn.textContent = "😼 Peek"; delete btn.dataset.shown; return;
   }
   try {
     const { password } = await api(`/wifi/${b}/password`);
@@ -471,22 +473,22 @@ async function revealPassword(btn, b) {
     if (password) {
       const c = document.createElement("button");
       c.className = "copy"; c.textContent = " 📋"; c.title = "Copy password";
-      c.onclick = ev => { ev.stopPropagation(); navigator.clipboard.writeText(password); toast("Wi-Fi password copied 📋", "ok"); };
+      c.onclick = ev => { ev.stopPropagation(); navigator.clipboard.writeText(password); toast("📋 Wi-Fi password pawed onto your clipboard 😺", "ok"); };
       el.append(c);
     }
   } catch (ex) { toast(ex.message, "bad"); }
 }
 
 async function reboot() {
-  if (!(await confirmBox("Reboot the router?", "Everything drops offline for a minute or two while it restarts.", "⏻ Reboot", true))) return;
-  try { await api("/reboot", { method: "POST" }); toast("Rebooting… I'll keep checking back. ☕", "ok"); }
+  if (!(await confirmBox("Reboot the router?", "Cat nap time: everything drops offline for a minute or two while it restarts.", "😴 Reboot", true))) return;
+  try { await api("/reboot", { method: "POST" }); toast("Router is cat-napping… I'll keep checking back. 😴", "ok"); }
   catch (ex) { toast(ex.message, "bad"); }
 }
 
 async function openSettings() {
   const st = await api("/status");
   const choice = await modal(`
-    <h3>⚙ Settings</h3>
+    <h3>😺 Settings</h3>
     <p>Connected to <b class="mono">${esc(st.host)}:${esc(st.port)}</b> as <b>${esc(st.username)}</b>${st.useHttps ? " over HTTPS" : ""}.</p>
     <div class="actions">
       <button class="btn ghost" value="cancel">Close</button>
@@ -510,9 +512,9 @@ const prettyPorts = r => (r || "").split(",").map(x => { const [a, b] = x.split(
 const deviceByIp = ip => ui.snap?.devices.find(d => d.ip === ip);
 
 async function loadPf() {
-  $("#pfList").innerHTML = `<div class="empty"><span class="spin">⟳</span> Asking the router…</div>`;
+  $("#pfList").innerHTML = `<div class="empty"><span class="spin">🧶</span> Pawing at the router…</div>`;
   try { ui.pf = await api("/portforwards"); renderPf(); fillProtocols(); }
-  catch (ex) { $("#pfList").innerHTML = `<div class="empty">⚠ ${esc(ex.message)}</div>`; }
+  catch (ex) { $("#pfList").innerHTML = `<div class="empty">🙀 ${esc(ex.message)}</div>`; }
 }
 
 // The list page doesn't show protocols, and reading one rule's details takes the router ~6 s (todo=edit).
@@ -545,14 +547,14 @@ function renderPf() {
   $("#pfList").innerHTML = list.length ? list.map((r, i) => {
     const d = deviceByIp(r.ip);
     const g = d ? band(d.band).g : "var(--gunk)";
-    const who = d ? `${deviceIcon(d)} ${esc(d.name || "Unknown device")}${labelFor(d) ? ` <span class="pf-label">${esc(labelFor(d))}</span>` : ""}` : "❔ No device online with this IP";
+    const who = d ? `${deviceIcon(d)} ${esc(d.name || "Unknown device")}${labelFor(d) ? ` <span class="pf-label">${esc(labelFor(d))}</span>` : ""}` : "👻 No device online with this IP";
     const sameIn = r.externalPorts === r.internalPorts;
     return `
     <article class="pf" style="--g:${g}; animation-delay:${i * 40}ms">
       <div class="pf-name"><span class="pf-num">#${r.number}</span> ${esc(r.name)} ${r.protocol ? `<span class="badge">${PROTOS[r.protocol] || r.protocol}</span>` : ""}</div>
       <div class="pf-flow">
         <span class="pf-port" title="Port on your public IP">🌍 ${esc(prettyPorts(r.externalPorts))}</span>
-        <span class="pf-arrow">➜</span>
+        <span class="pf-arrow" title="forwarded to"><i class="paw"></i>➜</span>
         <span class="pf-port in" title="Port on the device">${esc(prettyPorts(r.internalPorts))}${sameIn ? "" : " (internal)"}</span>
       </div>
       <div class="pf-dev"><span>${who}</span><span class="mono muted">${esc(r.ip)}</span></div>
@@ -561,7 +563,7 @@ function renderPf() {
         <button class="btn sm ghost" data-pf-del="${r.number}">🗑 Delete</button>
       </div>
     </article>`;
-  }).join("") : `<div class="empty">No port forwarding rules. Your network's front door is shut tight. 🚪🔒</div>`;
+  }).join("") : `<div class="empty">No port forwarding rules. Every cat flap is shut tight. 🐈‍⬛🔒</div>`;
 }
 
 let pfEditTicket = 0;
@@ -581,11 +583,11 @@ async function pfEdit(number) {
   const known = devices.some(d => d.ip === rule.ip);
   const dlg = $("#modal"), form = $("#modalForm");
   form.innerHTML = `
-    <h3>${number == null ? "＋ New port forwarding rule" : `✏️ Edit rule #${number}`}</h3>
+    <h3>${number == null ? `<i class="paw"></i> New port forwarding rule` : `✏️ Edit rule #${number}`}</h3>
     <label>Name <input id="pfName" maxlength="30" value="${esc(rule.name)}" placeholder="e.g. Minecraft server" required></label>
     <div class="row">
       <label>Protocol
-        <select id="pfProto" ${needProto ? "disabled" : ""}>${needProto ? `<option value="">⟳ Reading from router…</option>` : protoOptions(rule.protocol)}</select>
+        <select id="pfProto" ${needProto ? "disabled" : ""}>${needProto ? `<option value="">🧶 Reading from router…</option>` : protoOptions(rule.protocol)}</select>
       </label>
       <label>External port(s) <input id="pfExt" class="mono" value="${esc(prettyPorts(rule.externalPorts).replace(/–/g, "-"))}" placeholder="8080 or 5000-5010"></label>
     </div>
@@ -622,13 +624,13 @@ async function pfEdit(number) {
       internalPorts: $("#pfSame").checked ? "" : $("#pfIn").value,
       ip: dev === "other" ? $("#pfIp").value : dev,
     };
-    btn.disabled = true; btn.innerHTML = `<span class="spin">⟳</span> Saving…`;
+    btn.disabled = true; btn.innerHTML = `<span class="spin">🧶</span> Saving…`;
     try {
       ui.pf = await api(number == null ? "/portforwards" : `/portforwards/${number}`, { method: number == null ? "POST" : "PUT", body });
       dlg.close("saved");
       renderPf();
       fillProtocols();
-      toast(number == null ? `Rule “${body.name.trim()}” added 🚪` : `Rule “${body.name.trim()}” saved ✅`, "ok");
+      toast(number == null ? `Cat flap “${body.name.trim()}” installed 🚪🐈` : `Rule “${body.name.trim()}” saved 😺`, "ok");
     } catch (ex) {
       err.textContent = ex.message; err.hidden = false;
       btn.disabled = false; btn.textContent = number == null ? "Add rule" : "Save changes";
@@ -665,7 +667,7 @@ async function pfDelete(number) {
     ui.pf = await api(`/portforwards/${number}`, { method: "DELETE" });
     renderPf();
     fillProtocols();
-    toast(`Rule “${r.name}” deleted`, "ok");
+    toast(`Rule “${r.name}” deleted: flap sealed 🔒`, "ok");
   } catch (ex) { toast(ex.message, "bad"); }
 }
 
@@ -713,3 +715,28 @@ function mb(v) {
 }
 
 boot().catch(ex => { document.body.insertAdjacentHTML("beforeend", `<p class="error" style="margin:2rem">${esc(ex.message)}</p>`); });
+
+// ───────────────────────── 🐾 pet the cat ─────────────────────────
+// Click the logo: it wiggles and makes a tiny synthesized "mrrp" (only ever on a click, never on its own).
+function meow() {
+  try {
+    const C = new AudioContext(), t = C.currentTime;
+    const o = C.createOscillator(), f = C.createBiquadFilter(), g = C.createGain();
+    o.type = "sawtooth"; f.type = "bandpass"; f.Q.value = 5;
+    o.frequency.setValueAtTime(480, t); o.frequency.linearRampToValueAtTime(760, t + .16); o.frequency.linearRampToValueAtTime(430, t + .5);
+    f.frequency.setValueAtTime(1100, t); f.frequency.linearRampToValueAtTime(2300, t + .18); f.frequency.linearRampToValueAtTime(900, t + .5);
+    g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(.22, t + .04); g.gain.linearRampToValueAtTime(.15, t + .38); g.gain.linearRampToValueAtTime(0, t + .55);
+    o.connect(f).connect(g).connect(C.destination);
+    o.start(t); o.stop(t + .6); o.onended = () => C.close();
+  } catch { /* no audio, no problem */ }
+}
+for (const img of document.querySelectorAll(".pet-me")) img.addEventListener("click", e => {
+  img.classList.remove("petted"); void img.offsetWidth; img.classList.add("petted");
+  meow();
+  const pop = document.createElement("span");
+  pop.className = "purr-pop";
+  pop.textContent = ["mrrp!", "purr…", "meow!", "prrrt?", "😻"][Math.floor(Math.random() * 5)];
+  pop.style.left = e.clientX + "px"; pop.style.top = (e.clientY - 20) + "px";
+  document.body.append(pop);
+  setTimeout(() => pop.remove(), 1200);
+});
