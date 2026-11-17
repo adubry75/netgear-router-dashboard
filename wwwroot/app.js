@@ -147,6 +147,7 @@ async function loadCore(force) {
     render();
   } catch (ex) {
     if (ex.status === 401 || ex.status === 409) return showSetup(await api("/status"));
+    if (Date.now() < (ui.wifiRestartUntil || 0)) return; // expected: Wi-Fi is restarting; awaitWifiRestart() reports
     const b = $("#banner");
     b.textContent = `🙀 ${ex.message} Showing the last data I had.`;
     b.hidden = false;
@@ -167,6 +168,7 @@ function render() {
   if (ui.pf) renderPf(); // rules may have loaded before the device list they link to
   if (ui.dhcp) renderDhcp();
   if (ui.logs) renderLogs(); // device names in the log come from the snapshot
+  updateWifiLive();
   tick();
 }
 
@@ -828,6 +830,8 @@ async function rsvDelete(number) {
 const isThisPc = d => !!d?.ip && ui.localIps.includes(d.ip);
 const thisPc = () => ui.snap?.devices.find(isThisPc);
 const bandKey = bn => bn === "2.4" ? "b24" : "b5";
+// Measured on the R6350 (Windows WLAN log): any Wi-Fi Apply drops BOTH bands; this PC was back after ~20 s.
+const WIFI_RESTART_MS = 90_000;
 
 async function loadWifi() {
   $("#wlForm").innerHTML = `<div class="empty"><span class="spin">🧶</span> Sniffing the airwaves…</div>`;
@@ -844,30 +848,89 @@ function renderWifiSettings() {
     const bb = band(b.band);
     const clients = ui.snap ? ui.snap.devices.filter(d => d.band === b.band).length : null;
     return `
-    <div class="glass panel wifi wl-card" style="--g:${bb.g}">
+    <div class="glass panel wifi wl-card" id="wlCard${k}" style="--g:${bb.g}">
       <div class="stripe"></div>
       <h3><span class="band-tag">${bb.label}</span> ${b.radioOn ? "" : `<span class="badge blk">radio off</span>`}
-        ${pc?.band === b.band ? `<span class="badge warn" title="Saving changes to this band drops this PC's connection for a moment">💻 this PC is on it</span>` : ""}</h3>
-      <label>Network name (SSID) <input id="wlSsid${k}" maxlength="32" value="${esc(b.ssid)}" required></label>
-      <label>Password <span class="pw-row"><input id="wlPw${k}" type="password" maxlength="64" placeholder="•••••••• (unchanged)" autocomplete="new-password">
+        <span class="badge wl-pc" title="The computer PurrRouter is running on" ${pc?.band === b.band ? "" : "hidden"}>💻 this PC</span>
+        <span class="badge warn wl-unsaved" hidden>✏️ unsaved</span></h3>
+      <label data-wl-field="ssid">Network name (SSID) <input id="wlSsid${k}" maxlength="32" value="${esc(b.ssid)}" required></label>
+      <label data-wl-field="password">Password <span class="pw-row"><input id="wlPw${k}" type="password" maxlength="64" placeholder="•••••••• (unchanged)" autocomplete="new-password">
         <button type="button" class="btn sm" data-wl-peek="${k}">😼 Peek</button></span></label>
       <div class="row">
-        <label>Channel <select id="wlCh${k}">${(b.channelOptions.length ? b.channelOptions : [b.channel]).map(c =>
-          `<option value="${c}" ${c === b.channel ? "selected" : ""}>${c === "0" ? "Auto 🎲" : c}</option>`).join("")}</select></label>
-        <label class="check wl-bc"><input type="checkbox" id="wlBc${k}" ${b.broadcast ? "checked" : ""}> Broadcast name</label>
+        <label data-wl-field="channel">Channel <select id="wlCh${k}">${(b.channelOptions.length ? b.channelOptions : [b.channel]).map(c =>
+          `<option value="${c}" ${c === b.channel ? "selected" : ""}>${c === "0" ? "Auto 🎲" : c}</option>`).join("")}</select>
+          <span class="wl-was small">saved: ${b.channel === "0" ? "Auto" : esc(b.channel)}</span></label>
+        <label class="check wl-bc" data-wl-field="broadcast"><input type="checkbox" id="wlBc${k}" ${b.broadcast ? "checked" : ""}> Broadcast name</label>
       </div>
       <dl class="kv">
         <dt>Mode</dt><dd>${esc(b.mode)}</dd>
         <dt>Security</dt><dd>${esc(b.security)}</dd>
-        ${clients == null ? "" : `<dt>Cats on it now</dt><dd>${clients}</dd>`}
+        <dt>Cats on it now</dt><dd class="wl-clients">${clients ?? "—"}</dd>
       </dl>
     </div>`;
   }).join("") + `
     <div class="wl-actions">
-      <span class="muted small">Leave the password empty to keep the current one. With broadcast off the network still works, but devices must type its name to join.</span>
-      <button type="submit" class="btn primary" id="wlSave"><i class="paw"></i> Save Wi-Fi settings</button>
+      <span class="muted small" id="wlHint">Leave the password empty to keep the current one. With broadcast off the network still works, but devices must type its name to join.</span>
+      <span class="wl-buttons">
+        <button type="button" class="btn ghost" id="wlDiscard" hidden>↩ Discard changes</button>
+        <button type="submit" class="btn primary" id="wlSave" disabled><i class="paw"></i> Save Wi-Fi settings</button>
+      </span>
     </div>`;
-  $("#wlForm").onsubmit = saveWifi;
+  const form = $("#wlForm");
+  form.onsubmit = saveWifi;
+  form.oninput = form.onchange = markWifiDirty;
+  $("#wlDiscard").onclick = () => { renderWifiSettings(); toast("Changes discarded. Back to what the router has. 😺", "ok"); };
+  markWifiDirty();
+}
+
+// Device counts + "this PC" badge come from the snapshot, which may arrive after (or refresh under) the form:
+// update just those, never re-render, so unsaved edits survive.
+function updateWifiLive() {
+  const pc = thisPc();
+  for (const b of ui.wl?.bands || []) {
+    const card = $(`#wlCard${b.band.replace(".", "")}`);
+    if (!card || !ui.snap) continue;
+    card.querySelector(".wl-clients").textContent = ui.snap.devices.filter(d => d.band === b.band).length;
+    card.querySelector(".wl-pc").hidden = pc?.band !== b.band;
+  }
+}
+
+// What's different from what the router reported, per band: { b24: {channel: "6"}, ... }.
+function wifiChanges() {
+  const body = {}, changed = [];
+  for (const b of ui.wl?.bands || []) {
+    const k = b.band.replace(".", ""), c = {};
+    const ssidEl = $(`#wlSsid${k}`), pwEl = $(`#wlPw${k}`), chEl = $(`#wlCh${k}`), bcEl = $(`#wlBc${k}`);
+    if (!ssidEl) continue;
+    if (ssidEl.value !== b.ssid) c.ssid = ssidEl.value;
+    if (pwEl.value && pwEl.value !== pwEl.dataset.current) c.password = pwEl.value;
+    if (chEl.value !== b.channel) c.channel = chEl.value;
+    if (bcEl.checked !== b.broadcast) c.broadcast = bcEl.checked;
+    if (Object.keys(c).length) { body[bandKey(b.band)] = c; changed.push(b.band); }
+  }
+  return { body, changed };
+}
+
+// Make unsaved edits impossible to miss: highlighted fields, "unsaved" badge per band, a dot on the tab, Save/Discard.
+function markWifiDirty() {
+  const { body } = wifiChanges();
+  let any = false;
+  for (const b of ui.wl?.bands || []) {
+    const k = b.band.replace(".", ""), c = body[bandKey(b.band)] || {}, card = $(`#wlCard${k}`);
+    if (!card) continue;
+    for (const f of ["ssid", "password", "channel", "broadcast"])
+      card.querySelector(`[data-wl-field="${f}"]`)?.classList.toggle("dirty", c[f] !== undefined);
+    const dirty = Object.keys(c).length > 0;
+    card.classList.toggle("dirty", dirty);
+    card.querySelector(".wl-unsaved").hidden = !dirty;
+    any ||= dirty;
+  }
+  ui.wlDirty = any;
+  if ($("#wlSave")) { $("#wlSave").disabled = !any; $("#wlDiscard").hidden = !any; }
+  if ($("#wlHint")) $("#wlHint").innerHTML = any
+    ? `<b class="wl-dirty-note">✏️ Unsaved changes.</b> Nothing has been sent to the router yet. Save to apply them, or discard.`
+    : "Leave the password empty to keep the current one. With broadcast off the network still works, but devices must type its name to join.";
+  document.querySelector('#tabs button[data-tab="wifi"]')?.classList.toggle("dirty", any);
 }
 
 async function peekWifiPw(btn) {
@@ -878,31 +941,24 @@ async function peekWifiPw(btn) {
     catch (ex) { return toast(ex.message, "bad"); }
   }
   input.type = "text"; btn.textContent = "🙈 Hide";
+  markWifiDirty();
 }
 
 async function saveWifi(ev) {
   ev.preventDefault();
-  const body = {}, changed = [];
-  for (const b of ui.wl.bands) {
-    const k = b.band.replace(".", ""), c = {};
-    const ssid = $(`#wlSsid${k}`).value, pwEl = $(`#wlPw${k}`), ch = $(`#wlCh${k}`).value, bc = $(`#wlBc${k}`).checked;
-    if (ssid !== b.ssid) c.ssid = ssid;
-    if (pwEl.value && pwEl.value !== pwEl.dataset.current) c.password = pwEl.value;
-    if (ch !== b.channel) c.channel = ch;
-    if (bc !== b.broadcast) c.broadcast = bc;
-    if (Object.keys(c).length) { body[bandKey(b.band)] = c; changed.push(b.band); }
-  }
+  const { body, changed } = wifiChanges();
   if (!changed.length) return toast("Nothing changed. The cats are content. 😺", "ok");
   const pc = thisPc();
-  const pcChange = pc && body[bandKey(pc.band)];
+  const pcOnWifi = pc && pc.band !== "wired";
+  const pcCreds = pcOnWifi && body[bandKey(pc.band)] && (body[bandKey(pc.band)].ssid != null || body[bandKey(pc.band)].password);
   const lines = changed.map(bn => {
     const c = body[bandKey(bn)];
     return `${band(bn).label}: ${[c.ssid != null && `name → “${c.ssid}”`, c.password && "new password", c.channel && `channel → ${c.channel === "0" ? "Auto" : c.channel}`,
       c.broadcast != null && (c.broadcast ? "broadcast the name" : "hide the name")].filter(Boolean).join(", ")}`;
   });
   const ok = await confirmBox("Save Wi-Fi settings?",
-    `${lines.join(" · ")}. The router restarts its Wi-Fi, so wireless devices drop off for a moment.` +
-    (pcChange ? ` This PC is on ${band(pc.band).label}: it will lose its connection too${pcChange.ssid != null || pcChange.password ? " and must rejoin with the new name/password" : ""}.` : ""),
+    `${lines.join(" · ")}. The router restarts BOTH Wi-Fi bands for any change, so every wireless device drops off for about 20 seconds.` +
+    (pcOnWifi ? ` That includes this PC (on ${band(pc.band).label})${pcCreds ? ", which must then rejoin with the new name/password" : ""}.` : ""),
     "📶 Save", true);
   if (!ok) return;
   const btn = $("#wlSave");
@@ -910,12 +966,33 @@ async function saveWifi(ev) {
   try {
     ui.wl = await api("/wifi/settings", { method: "PUT", body });
     renderWifiSettings();
-    toast("Wi-Fi settings saved. The cats will find their way back. 😺", "ok");
-    load(true);
+    toast("Saved! The router is restarting its Wi-Fi. Cats will be back in about 20 seconds. 😺", "ok");
+    awaitWifiRestart();
   } catch (ex) {
     toast(ex.message, "bad");
     btn.disabled = false; btn.innerHTML = `<i class="paw"></i> Save Wi-Fi settings`;
   }
+}
+
+// After a Wi-Fi Apply the network is briefly gone (this PC too, if it's on Wi-Fi): say so instead of erroring,
+// and refresh once the router answers again.
+async function awaitWifiRestart() {
+  ui.wifiRestartUntil = Date.now() + WIFI_RESTART_MS;
+  const b = $("#banner");
+  b.textContent = "📶 The router is restarting its Wi-Fi after your change. Waiting for it to come back…";
+  b.hidden = false;
+  await new Promise(r => setTimeout(r, 15000));
+  while (Date.now() < ui.wifiRestartUntil) {
+    try {
+      ui.snap = await api("/snapshot?force=true");
+      ui.wifiRestartUntil = 0;
+      b.hidden = true;
+      render();
+      return toast("Wi-Fi is back. Every cat found its way home. 🐈", "ok");
+    } catch { await new Promise(r => setTimeout(r, 5000)); }
+  }
+  ui.wifiRestartUntil = 0;
+  b.textContent = "🙀 The router still isn't answering 90 seconds after the Wi-Fi change. Check this PC's network connection.";
 }
 
 // ───────────────────────── logs & status (read-only) ─────────────────────────

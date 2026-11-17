@@ -387,3 +387,13 @@ label.check { display: flex; align-items: center; gap: .5rem; }
 .log-foot { text-align: center; padding: .5rem; }
 @media (max-width: 800px) { .log-row { grid-template-columns: 1fr; gap: .15rem; } }
 .st-port { align-content: start; }
+
+/* unsaved Wi-Fi edits */
+.wl-card.dirty { border-color: rgba(251, 191, 36, .55); box-shadow: 0 0 0 1px rgba(251, 191, 36, .35), 0 10px 40px rgba(0, 0, 0, .35); }
+label.dirty { color: #fde68a; }
+label.dirty input:not([type=checkbox]), label.dirty select { border-color: #fbbf24; box-shadow: 0 0 0 3px rgba(251, 191, 36, .2); }
+.wl-was { color: var(--muted); display: none; }
+label.dirty .wl-was { display: block; }
+.wl-dirty-note { color: #fde68a; }
+.wl-buttons { display: flex; gap: .6rem; }
+.tabs button.dirty::after { content: ""; display: inline-block; width: 8px; height: 8px; margin-left: .45rem; border-radius: 50%; background: #fbbf24; box-shadow: 0 0 8px #fbbf24; vertical-align: middle; }
