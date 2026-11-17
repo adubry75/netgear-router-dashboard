@@ -49,9 +49,12 @@ public sealed class SettingsStore
 
     public static string DataDir { get; } = ResolveDataDir();
 
-    /// <summary>%LOCALAPPDATA%\PurrRouter (moved over from the old RouterDash folder on first run).</summary>
+    /// <summary>%LOCALAPPDATA%\PurrRouter (moved over from the old RouterDash folder on first run).
+    /// PURRROUTER_DATA_DIR overrides it, so a test run against the mock router can't touch the real saved password.</summary>
     static string ResolveDataDir()
     {
+        if (Environment.GetEnvironmentVariable("PURRROUTER_DATA_DIR") is { Length: > 0 } custom)
+            return Directory.CreateDirectory(custom).FullName;
         var local = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         var dir = Path.Combine(local, "PurrRouter");
         var old = Path.Combine(local, "RouterDash");

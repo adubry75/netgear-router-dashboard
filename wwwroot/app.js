@@ -515,18 +515,29 @@ async function loadPf() {
   catch (ex) { $("#pfList").innerHTML = `<div class="empty">⚠ ${esc(ex.message)}</div>`; }
 }
 
-// The list page doesn't show protocols; ask for each rule's details one by one (read-only, gentle on the router).
-const pfProtoCache = {};
-async function fillProtocols() {
-  for (const r of ui.pf || []) {
-    const key = `${r.number}|${r.name}|${r.externalPorts}|${r.ip}`;
-    if (!pfProtoCache[key]) {
-      try { pfProtoCache[key] = (await api(`/portforwards/${r.number}`)).protocol; } catch { continue; }
-    }
-    r.protocol = pfProtoCache[key];
-    if (ui.tab === "ports") renderPf();
-  }
+// The list page doesn't show protocols, and reading one rule's details takes the router ~6 s (todo=edit).
+// The server remembers protocols it has read, so this only fetches the missing ones: one at a time, never two
+// loops at once, and paused while a dialog is open so an Edit/Save never waits behind a queue of reads.
+const pfSame = (a, b) => a.name === b.name && a.ip === b.ip && a.externalPorts === b.externalPorts && a.internalPorts === b.internalPorts;
+let pfFilling = null;
+function fillProtocols() {
+  pfFilling ??= (async () => {
+    const failed = new Set();
+    try {
+      for (;;) {
+        if ($("#modal").open) return; // resumed by the dialog's close handler below
+        const r = (ui.pf || []).find(x => !x.protocol && !failed.has(x));
+        if (!r) return;
+        try {
+          const d = await api(`/portforwards/${r.number}`);
+          if (pfSame(d, r) && d.protocol) r.protocol = d.protocol; else failed.add(r);
+        } catch { failed.add(r); }
+        if (ui.tab === "ports") renderPf();
+      }
+    } finally { pfFilling = null; }
+  })();
 }
+$("#modal").addEventListener("close", () => { if (ui.pf) fillProtocols(); });
 
 function renderPf() {
   const list = ui.pf || [];
@@ -553,12 +564,17 @@ function renderPf() {
   }).join("") : `<div class="empty">No port forwarding rules. Your network's front door is shut tight. 🚪🔒</div>`;
 }
 
+let pfEditTicket = 0;
 async function pfEdit(number) {
+  // Open instantly from the list row; only the protocol may still need the router's slow (~6 s) editor read.
   let rule = { name: "", protocol: "BOTH", externalPorts: "", internalPorts: "", ip: "" };
+  const row = number == null ? null : ui.pf?.find(x => x.number === number);
   if (number != null) {
-    try { rule = await api(`/portforwards/${number}`); }
-    catch (ex) { return toast(ex.message, "bad"); }
+    if (!row) return toast("That rule isn't in the list anymore. Hit Reload and try again.", "bad");
+    rule = { ...row };
   }
+  const ticket = ++pfEditTicket;
+  const needProto = number != null && !rule.protocol;
   const same = !rule.internalPorts || rule.internalPorts === rule.externalPorts;
   const devices = [...(ui.snap?.devices || [])].filter(d => d.ip)
     .sort((a, b) => (labelFor(a) || a.name || "~").localeCompare(labelFor(b) || b.name || "~"));
@@ -569,7 +585,7 @@ async function pfEdit(number) {
     <label>Name <input id="pfName" maxlength="30" value="${esc(rule.name)}" placeholder="e.g. Minecraft server" required></label>
     <div class="row">
       <label>Protocol
-        <select id="pfProto">${Object.entries(PROTOS).map(([k, v]) => `<option value="${k}" ${rule.protocol === k ? "selected" : ""}>${v}</option>`).join("")}</select>
+        <select id="pfProto" ${needProto ? "disabled" : ""}>${needProto ? `<option value="">⟳ Reading from router…</option>` : protoOptions(rule.protocol)}</select>
       </label>
       <label>External port(s) <input id="pfExt" class="mono" value="${esc(prettyPorts(rule.externalPorts).replace(/–/g, "-"))}" placeholder="8080 or 5000-5010"></label>
     </div>
@@ -586,10 +602,11 @@ async function pfEdit(number) {
     <p id="pfErr" class="error" hidden></p>
     <div class="actions">
       <button type="button" class="btn ghost" id="pfCancel">Cancel</button>
-      <button type="submit" class="btn primary" id="pfSave">${number == null ? "Add rule" : "Save changes"}</button>
+      <button type="submit" class="btn primary" id="pfSave" ${needProto ? "disabled" : ""}>${number == null ? "Add rule" : "Save changes"}</button>
     </div>`;
   dlg.showModal();
   $("#pfName").focus();
+  if (needProto) pfLoadProtocol(number, row, ticket);
   $("#pfSame").onchange = e => { $("#pfInWrap").hidden = e.target.checked; };
   $("#pfDev").onchange = e => { $("#pfIpWrap").hidden = e.target.value !== "other"; };
   $("#pfCancel").onclick = () => dlg.close("cancel");
@@ -618,6 +635,26 @@ async function pfEdit(number) {
     }
   };
   dlg.addEventListener("close", () => { form.onsubmit = null; }, { once: true });
+}
+
+const protoOptions = sel => Object.entries(PROTOS).map(([k, v]) => `<option value="${k}" ${sel === k ? "selected" : ""}>${v}</option>`).join("");
+
+// Fills in the edit dialog's protocol once the router answers (if the same dialog is still open).
+async function pfLoadProtocol(number, row, ticket) {
+  const stillOpen = () => ticket === pfEditTicket && $("#modal").open;
+  const fail = msg => { if (stillOpen()) { $("#pfErr").textContent = msg; $("#pfErr").hidden = false; $("#pfProto").innerHTML = `<option value="">—</option>`; } };
+  let d;
+  try { d = await api(`/portforwards/${number}`); }
+  catch (ex) { return fail(ex.message); }
+  if (!pfSame(d, row)) return fail("This rule changed on the router since the list loaded. Close this and hit Reload.");
+  if (!d.protocol) return fail("Couldn't read this rule's protocol from the router.");
+  row.protocol = d.protocol;
+  if (ui.tab === "ports") renderPf();
+  if (!stillOpen()) return;
+  const sel = $("#pfProto");
+  sel.innerHTML = protoOptions(d.protocol);
+  sel.disabled = false;
+  $("#pfSave").disabled = false;
 }
 
 async function pfDelete(number) {

@@ -147,16 +147,18 @@ public sealed partial class NetgearClient : IDisposable
         List<(string, string)> hdrs = [("Authorization", basic), ("User-Agent", "Mozilla/5.0 PurrRouter")];
         if (_webCookie is not null) hdrs.Add(("Cookie", _webCookie));
 
+        var sw = System.Diagnostics.Stopwatch.StartNew();
         var resp = await RawHttp.SendAsync(url, "GET", hdrs, null, Timeout, ct);
-        LogWeb(resp, pathAndQuery);
+        LogWeb(resp, pathAndQuery, sw.ElapsedMilliseconds);
 
         if (resp.Status == 401 && resp.All("Set-Cookie").Any())
         {
             _webCookie = string.Join("; ", resp.All("Set-Cookie").Select(c => c.Split(';')[0].Trim()));
             hdrs.RemoveAll(h => h.Item1 == "Cookie");
             hdrs.Add(("Cookie", _webCookie));
+            sw.Restart();
             resp = await RawHttp.SendAsync(url, "GET", hdrs, null, Timeout, ct);
-            LogWeb(resp, pathAndQuery);
+            LogWeb(resp, pathAndQuery, sw.ElapsedMilliseconds);
         }
         return resp;
     }
@@ -177,8 +179,8 @@ public sealed partial class NetgearClient : IDisposable
         finally { _lock.Release(); }
     }
 
-    static void LogWeb(RawHttp.Response r, string path) => Diag.Log(
-        $"{"WEB " + path.Split('?')[0].Split('=').Last(),-28} → HTTP {r.Status} len={r.Body.Length}"
+    static void LogWeb(RawHttp.Response r, string path, long ms) => Diag.Log(
+        $"{"WEB " + path.Split('?')[0].Split('=').Last(),-28} → HTTP {r.Status} len={r.Body.Length} {ms}ms"
         + (r.First("WWW-Authenticate") is { } wa ? $" auth=\"{wa}\"" : "")
         + (r.All("Set-Cookie").Any() ? $" set-cookie={Diag.Shape(string.Join(", ", r.All("Set-Cookie")))}" : "")
         + $" headers=[{string.Join(",", r.Headers.Select(h => h.Key))}]");

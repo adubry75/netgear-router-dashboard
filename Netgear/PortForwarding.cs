@@ -18,13 +18,20 @@ public sealed partial class NetgearClient
 
     public static readonly string[] Protocols = ["BOTH", "TCP", "UDP"]; // router's select order = h_pfw_proto index
 
+    // The list page doesn't include protocols, and reading one costs a ~6 s todo=edit round trip on the R6350
+    // (measured: the router takes ~6.2 s before its first byte). So remember each rule's protocol, keyed by
+    // everything the list page does show; a rule changed in any listed field gets a new key and is read again.
+    readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _pfProtocols = new();
+    static string PfKey(PortForward r) => $"{r.Name}|{r.ExternalPorts}|{r.InternalPorts}|{r.Ip}";
+    void RememberProtocol(PortForward r) { if (r.Protocol is { } p) _pfProtocols[PfKey(r)] = p; }
+
     public async Task<List<PortForward>> GetPortForwardsAsync(CancellationToken ct = default)
     {
         await _lock.WaitAsync(ct);
         try
         {
             var page = await WebPageOrThrowAsync(FwList, ct);
-            return ParseForwardList(page);
+            return WithProtocols(ParseForwardList(page));
         }
         finally { _lock.Release(); }
     }
@@ -36,7 +43,10 @@ public sealed partial class NetgearClient
         try
         {
             var edit = await OpenEditorAsync(number, ct);
-            return edit is null ? null : EditorToRule(number, edit);
+            if (edit is null) return null;
+            var rule = EditorToRule(number, edit);
+            RememberProtocol(rule);
+            return rule;
         }
         finally { _lock.Release(); }
     }
@@ -55,7 +65,8 @@ public sealed partial class NetgearClient
 
             if (after.Count <= before.Count || !after.Any(r => SameRule(r, rule)))
                 throw new RouterRejectedException(RouterMessage(result) ?? "The router didn't save the new rule.");
-            return after;
+            RememberProtocol(rule);
+            return WithProtocols(after);
         }
         finally { _lock.Release(); }
     }
@@ -74,7 +85,8 @@ public sealed partial class NetgearClient
 
             if (!after.Any(r => SameRule(r, rule)))
                 throw new RouterRejectedException(RouterMessage(result) ?? "The router didn't save the change.");
-            return after;
+            RememberProtocol(rule);
+            return WithProtocols(after);
         }
         finally { _lock.Release(); }
     }
@@ -94,7 +106,7 @@ public sealed partial class NetgearClient
 
             if (after.Count >= before.Count)
                 throw new RouterRejectedException(RouterMessage(result) ?? $"The router didn't delete “{target.Name}”.");
-            return after;
+            return WithProtocols(after);
         }
         finally { _lock.Release(); }
     }
@@ -209,8 +221,9 @@ public sealed partial class NetgearClient
         Diag.Log($"  WEB POST todo={todo} {string.Join(", ", fields.Where(f => f.Key is "h_pfw_name" or "c4_pfw_ip" or "h_pfw_proto" or "h_pfw_ex_range" or "h_pfw_in_range" or "ruleSelect" or "edit").Select(f => $"{f.Key}={f.Value}"))}");
         try
         {
+            var sw = System.Diagnostics.Stopwatch.StartNew();
             var r = await RawHttp.SendAsync(url, "POST", hdrs, body, Timeout, ct);
-            Diag.Log($"{"WEB POST " + todo,-28} → HTTP {r.Status} len={r.Body.Length}");
+            Diag.Log($"{"WEB POST " + todo,-28} → HTTP {r.Status} len={r.Body.Length} {sw.ElapsedMilliseconds}ms");
             if (r.Status == 401) throw new RouterAuthException("The router rejected the web login. Check your password in Settings.");
             if (r.Status != 200) throw new RouterRejectedException($"The router answered HTTP {r.Status}.");
             return r.Body;
@@ -222,6 +235,9 @@ public sealed partial class NetgearClient
     }
 
     // ───────────────────────── parsing ─────────────────────────
+
+    List<PortForward> WithProtocols(List<PortForward> list) =>
+        list.Select(r => _pfProtocols.TryGetValue(PfKey(r), out var p) ? r with { Protocol = p } : r).ToList();
 
     static List<PortForward> ParseForwardList(string html)
     {
