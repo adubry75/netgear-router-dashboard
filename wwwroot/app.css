@@ -362,3 +362,13 @@ label.check { display: flex; align-items: center; gap: .5rem; }
 .badge.ok { background: rgba(74, 222, 128, .18); color: #bbf7d0; }
 .badge.warn { background: rgba(251, 191, 36, .18); color: #fde68a; }
 @media (max-width: 1000px) { .pf.rsv { grid-template-columns: 1fr 1fr; } }
+
+/* ───── Wi-Fi settings ───── */
+.wl-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; }
+@media (max-width: 800px) { .wl-grid { grid-template-columns: 1fr; } }
+.wl-card { gap: .9rem; }
+.pw-row { display: flex; gap: .5rem; align-items: center; }
+.pw-row input { flex: 1; }
+.wl-bc { align-self: end; padding-bottom: .7rem; }
+.wl-actions { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; gap: 1rem; flex-wrap: wrap; }
+.wl-actions .muted { max-width: 60ch; }

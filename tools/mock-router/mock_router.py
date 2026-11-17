@@ -37,6 +37,20 @@ RULES = [{"name": "web server", "ex": "8080-8080", "in": "80-80", "ip": "192.168
          {"name": "Game server", "ex": "25565-25565", "in": "25565-25565", "ip": "192.168.1.23", "proto": "0"}]
 GUEST = {"2.4": False, "5": False}
 EDITING = 0
+# Wireless Setup wrapper (WLG_dualband_idx.htm) hidden fields, same names/order as the R6350; fake values.
+WL = dict(h_ssid_class="primary", h_ssidSelect="1", h_ssidSelect_an="1", tempSetting="0", tempRegion="11", setRegion="11",
+          only_mode="0", warn_wpawpa2="0", warn_none_security="0", warn_wep_conflict_wps="0", warn_8021x_conflict_wps="0",
+          ssid="HomeWiFi", h_ssid_bc="enable", h_WRegion="United States", h_w_channel="6", h_opmode="300", h_wire_iso="disable",
+          h_wifi_badge_led_enable="", h_security_type="WPA2-PSK", h_authAlgm="3", h_wepenc="0", h_wep_key_no="1", h_wds="disable",
+          h_wpae_mode="3", KEY1="", KEY2="", KEY3="", KEY4="", h_enable_ap="enable", h_enable_bss_coexist="enable",
+          ssid_an="HomeWiFi-5G", h_wds_enable_an="disable", show_wps_alert="0", h_enable_ap_an="enable", h_ssid_bc_an="enable",
+          h_allow_access="disable", h_allow_access_an="disable", h_wire_iso_an="disable", h_w_channel_an="149", h_opmode_an="450",
+          h_security_type_an="WPA2-PSK", h_wepenc_an="0", h_wpae_mode_an="3", radius_rekey_secs="3600", radius_rekey_secs_an="3600",
+          radiusServer="", radiusServer_an="", textWpaeRadiusPort="1812", textWpaeRadiusPort_an="1812", textWpaeRadiusSecret="",
+          textWpaeRadiusSecret_an="", KEY1_an="", KEY2_an="", KEY3_an="", KEY4_an="", h_wep_key_no_an="1", h_authAlgm_an="3",
+          passphrase="example-password", passphrase_an="example-password", wifi_smart_connect_enable="", todo="save",
+          load_2g_frame="", load_5g_frame="", this_file="WLG_dualband_idx.htm", next_file="WLG_dualband_idx.htm", SID="")
+WL_WRITABLE = {"ssid", "ssid_an", "passphrase", "passphrase_an", "h_w_channel", "h_w_channel_an", "h_ssid_bc", "h_ssid_bc_an"}
 RESERVED = [{"ip": "192.168.1.10", "name": "MEDIA-SERVER", "mac": "28:11:22:33:44:0A"},
             {"ip": "192.168.1.5", "name": "DESKTOP-WIRED", "mac": "A8:11:22:33:44:0F"}]
 # LAN Setup exactly as the R6350 reports it; a Delete/Edit post must echo these back unchanged.
@@ -168,8 +182,36 @@ function print_all_reserve()
 <input type="hidden" name="this_file" value="{this_file}"><input type="hidden" name="next_file" value="LAN_lan.htm"><input type="hidden" name="SID" value="">
 </form></body></html>"""
 
+    def wl_pages(self, path):
+        global TOKEN
+        import secrets, html as H
+        if path.startswith("/WLG_dualband_idx.htm"):
+            TOKEN = secrets.token_hex(8)
+            hidden = "".join(f'<input type="hidden" name="{k}" value="{H.escape(v)}">' for k, v in WL.items())
+            return f'<html><head><script>var SKU = "NA";</script></head><body><form method="POST" action="setup.cgi?id={TOKEN}">{hidden}</form></body></html>'
+        on = lambda k: H.escape(WL[k])
+        if path.startswith("/WLG_2g_wireless2.htm"):
+            return f"""<html><body><form method="POST" action="setup.cgi??id=iframe24&sp=2">
+<input type="text" name="ssid" value="{on('ssid')}"><input type="checkbox" name="enable_bssid" value="enable_bssid"><input type="checkbox" name="ssid_bc" value="ssid_bc">
+<input type="text" name="passphrase" value="{on('passphrase')}"><input type="hidden" name="h_enable_bssid" value="enable"><input type="hidden" name="h_ssid_bc" value="{on('h_ssid_bc')}">
+<input type="hidden" name="h_w_channel" value="{on('h_w_channel')}"><input type="hidden" name="h_opmode" value="{on('h_opmode')}"><input type="hidden" name="h_security_type" value="{on('h_security_type')}">
+<input type="hidden" name="h_ssidSelect" value="1"><input type="hidden" name="h_enable_bss_coexist" value="enable"></form></body></html>"""
+        if path.startswith("/WLG_5g_wireless2.htm"):
+            return f"""<html><body><form method="POST" action="setup.cgi??id=iframe5&sp=2">
+<input type="text" name="ssid_an" value="{on('ssid_an')}"><input type="text" name="passphrase_an" value="{on('passphrase_an')}">
+<input type="hidden" name="h_enable_bssid_an" value="enable"><input type="hidden" name="h_ssid_bc_an" value="{on('h_ssid_bc_an')}">
+<input type="hidden" name="h_w_channel_an" value="{on('h_w_channel_an')}"><input type="hidden" name="h_opmode_an" value="{on('h_opmode_an')}">
+<input type="hidden" name="h_security_type_an" value="{on('h_security_type_an')}"><input type="hidden" name="h_ssidSelect_an" value="1"></form></body></html>"""
+        if path.startswith("/WLG_dualband_adv.htm"):
+            return '<html><body><form method="POST" action="setup.cgi?id=adv"><input type="hidden" name="h_enable_ap" value="enable"><input type="hidden" name="h_enable_ap_an" value="enable"></form></body></html>'
+        return None
+
     def do_GET(self):
         import base64
+        if self.path.startswith("/WLG_"):
+            if not self.web_auth_ok(): return self.html("", 401)
+            page = self.wl_pages(self.path)
+            if page is not None: return self.html(page)
         if self.path.startswith("/LAN_lan.htm"):
             if not self.web_auth_ok(): return self.html("", 401)
             return self.html(self.lan_page())
@@ -208,6 +250,15 @@ function print_all_reserve()
             if self.path.split("=",1)[1] != TOKEN:
                 return self.html("<script>alert('Session expired')</script>")   # stale token: router ignores
             todo = f.get("todo")
+            if f.get("this_file") == "WLG_dualband_idx.htm" and todo == "save":
+                expect = {**WL, "load_2g_frame": "WLG_2g_wireless2.htm", "load_5g_frame": "WLG_5g_wireless2.htm"}
+                bad = {k: (f.get(k), v) for k, v in expect.items() if k not in WL_WRITABLE and f.get(k) != v}
+                extra = set(f) - set(WL)
+                if bad or extra or list(f) != list(WL):
+                    print("WIFI FORM MISMATCH", bad, extra, flush=True)
+                    return self.html("<script>alert('wifi form mismatch')</script>")
+                for k in WL_WRITABLE: WL[k] = f[k]
+                return self.html(self.wl_pages("/WLG_dualband_idx.htm"))
             if f.get("this_file") == "LAN_lan.htm":   # Edit/Delete post the whole LAN Setup form
                 bad = {k: f.get(k) for k, v in {**{k: v for k, v in LAN.items() if k.startswith("c4_") or k in ("device_name", "h_dhcp_server", "h_wds", "h_apmode")}, **LAN_POSTED}.items() if f.get(k) != v}
                 if bad or f.get("ruleSelect") != f.get("h_ruleSelect"):

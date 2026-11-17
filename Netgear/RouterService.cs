@@ -253,6 +253,36 @@ public sealed class RouterService(SettingsStore store, ILogger<RouterService> lo
         return string.Join(",", output);
     }
 
+    // ───────────────────────── Wi-Fi settings ─────────────────────────
+
+    public Task<WifiSettings> GetWifiSettingsAsync(CancellationToken ct) => Client.GetWifiSettingsAsync(ct);
+
+    public Task<WifiSettings> SaveWifiSettingsAsync(WifiSaveInput input, CancellationToken ct)
+    {
+        var b24 = ValidateBand("2.4 GHz", input.B24);
+        var b5 = ValidateBand("5 GHz", input.B5);
+        if (b24 is null && b5 is null) throw new ValidationException("Nothing to change.");
+        return Client.SaveWifiSettingsAsync(b24, b5, ct);
+    }
+
+    /// <summary>Same rules as the Wireless pages' checkData(): SSID 1–32 printable chars, WPA2 key 8–63 printable or 64 hex.</summary>
+    static WifiBandChange? ValidateBand(string label, WifiBandChange? c)
+    {
+        if (c is null) return null;
+        if (c.Ssid is { } s && (s.Length is 0 or > 32 || s.Trim().Length == 0 || s.Any(ch => ch is < ' ' or > '~')))
+            throw new ValidationException($"{label} network name must be 1–32 plain characters (letters, numbers, spaces, punctuation).");
+        var pw = string.IsNullOrEmpty(c.Password) ? null : c.Password;
+        if (pw is not null)
+        {
+            var hex64 = pw.Length == 64 && pw.All(Uri.IsHexDigit);
+            if (!hex64 && (pw.Length is < 8 or > 63 || pw.Any(ch => ch is < ' ' or > '~')))
+                throw new ValidationException($"{label} password must be 8–63 plain characters (or exactly 64 hex digits).");
+        }
+        if (c.Channel is { } ch && !System.Text.RegularExpressions.Regex.IsMatch(ch, "^[0-9]{1,3}$"))
+            throw new ValidationException($"{label} channel must be Auto or a channel number.");
+        return c with { Password = pw };
+    }
+
     // ───────────────────────── DHCP reservations ─────────────────────────
 
     public Task<DhcpInfo> GetDhcpAsync(CancellationToken ct) => Client.GetDhcpAsync(ct);
@@ -381,6 +411,7 @@ public sealed class Snapshot
 
 public record PortForwardInput(string? Name, string? Protocol, string? ExternalPorts, string? InternalPorts, string? Ip);
 public record ReservationInput(string? Name, string? Mac, string? Ip, string? OriginalMac);
+public record WifiSaveInput(WifiBandChange? B24, WifiBandChange? B5);
 public sealed class ValidationException(string message) : Exception(message);
 
 public record RouterInfo(string Model, string? Name, string? Firmware, string? Serial, string? FirstUse, double? Cpu, double? Memory);

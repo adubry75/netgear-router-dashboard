@@ -54,6 +54,12 @@ api.MapGet("/status", (RouterService r) => new
     port = r.CurrentSettings?.Port,
     useHttps = r.CurrentSettings?.UseHttps,
     username = r.CurrentSettings?.Username,
+    // This PC's own IPv4 addresses, so the UI can say "this PC" and warn before a change that would cut it off.
+    localIps = System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()
+        .Where(n => n.OperationalStatus == System.Net.NetworkInformation.OperationalStatus.Up)
+        .SelectMany(n => n.GetIPProperties().UnicastAddresses)
+        .Where(a => a.Address.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork && !System.Net.IPAddress.IsLoopback(a.Address))
+        .Select(a => a.Address.ToString()).Distinct().ToArray(),
 });
 
 api.MapPost("/setup", async (SetupRequest req, RouterService r, CancellationToken ct) =>
@@ -116,7 +122,8 @@ api.MapGet("/router-page", (string path, RouterService r, CancellationToken ct) 
     var (status, body) = await r.GetRouterPageAsync(path, ct);
     // Hide session tokens (SID etc.): they're not needed to understand a page.
     body = System.Text.RegularExpressions.Regex.Replace(body,
-        @"((?:SID|sid|token|Token|TOKEN|session|csrf|xsrf)\w*[""']?\s*(?:[=:]|value=)\s*[""']?)[A-Za-z0-9+/=_\-]{6,}", "$1[hidden]");
+        // (?<![A-Za-z]) so "ssid"/"bssid" fields aren't mistaken for a session id.
+        @"((?<![A-Za-z])(?:SID|sid|token|Token|TOKEN|session|csrf|xsrf)\w*[""']?\s*(?:[=:]|value=)\s*[""']?)[A-Za-z0-9+/=_\-]{6,}", "$1[hidden]");
     return Results.Text(body, "text/plain; charset=utf-8", statusCode: status);
 }));
 
@@ -131,6 +138,12 @@ api.MapPut("/portforwards/{n:int}", (int n, PortForwardInput input, RouterServic
     Guard(async () => Results.Ok(await r.SavePortForwardAsync(n, input, ct))));
 api.MapDelete("/portforwards/{n:int}", (int n, RouterService r, CancellationToken ct) =>
     Guard(async () => Results.Ok(await r.DeletePortForwardAsync(n, ct))));
+
+// ───── Wi-Fi settings (Wireless Setup) ─────
+api.MapGet("/wifi/settings", (RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.GetWifiSettingsAsync(ct))));
+api.MapPut("/wifi/settings", (WifiSaveInput input, RouterService r, CancellationToken ct) =>
+    Guard(async () => Results.Ok(await r.SaveWifiSettingsAsync(input, ct))));
 
 // ───── DHCP reservations (LAN Setup) ─────
 api.MapGet("/dhcp", (RouterService r, CancellationToken ct) =>

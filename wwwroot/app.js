@@ -18,6 +18,8 @@ const ui = {
   tab: localStorage.getItem("rd.tab") || "overview",
   pf: null,
   dhcp: null,
+  wl: null,
+  localIps: [],
 };
 
 const BANDS = {
@@ -48,6 +50,7 @@ async function api(path, { method = "GET", body } = {}) {
 // ───────────────────────── boot ─────────────────────────
 async function boot() {
   const st = await api("/status");
+  ui.localIps = st.localIps || [];
   if (!st.configured) return showSetup(st);
   showDash();
 }
@@ -345,6 +348,7 @@ function deviceCard(d, i) {
     `<span class="badge band">${b.label}</span>`,
     d.isNew ? `<span class="badge new">NEW KITTEN</span>` : "",
     blocked ? `<span class="badge blk">⛔ blocked</span>` : "",
+    isThisPc(d) ? `<span class="badge ok" title="The computer PurrRouter is running on">💻 this PC</span>` : "",
     d.privateMac ? `<span class="badge" title="This device uses a randomized (private) MAC address">🎭 private MAC</span>` : "",
     reservationFor(d.mac) ? `<span class="badge" title="Reserved address: ${esc(reservationFor(d.mac).ip)}">🧺 reserved</span>` : "",
     d.ssid ? `<span class="badge">${esc(d.ssid)}</span>` : "",
@@ -399,6 +403,8 @@ document.addEventListener("click", async e => {
   else if (t.dataset.pfEdit) pfEdit(+t.dataset.pfEdit);
   else if (t.dataset.pfDel) pfDelete(+t.dataset.pfDel);
   else if (t.id === "rsvReload") loadDhcp();
+  else if (t.id === "wlReload") loadWifi();
+  else if (t.dataset.wlPeek) peekWifiPw(t);
   else if (t.id === "rsvAdd") rsvEdit(null);
   else if (t.dataset.rsvEdit) rsvEdit(+t.dataset.rsvEdit);
   else if (t.dataset.rsvDel) rsvDelete(+t.dataset.rsvDel);
@@ -512,6 +518,7 @@ function setTab(tab) {
   for (const p of document.querySelectorAll(".tabpane")) p.hidden = p.dataset.pane !== tab;
   if (tab === "ports" && !ui.pf) loadPf();
   if (tab === "dhcp" && !ui.dhcp) loadDhcp();
+  if (tab === "wifi" && !ui.wl) loadWifi();
 }
 
 // ───────────────────────── port forwarding ─────────────────────────
@@ -811,6 +818,100 @@ async function rsvDelete(number) {
     renderDhcp(); renderDevices();
     toast(`Reservation for ${r.name} removed: basket's up for grabs 🧺`, "ok");
   } catch (ex) { toast(ex.message, "bad"); }
+}
+
+// ───────────────────────── Wi-Fi settings ─────────────────────────
+const isThisPc = d => !!d?.ip && ui.localIps.includes(d.ip);
+const thisPc = () => ui.snap?.devices.find(isThisPc);
+const bandKey = bn => bn === "2.4" ? "b24" : "b5";
+
+async function loadWifi() {
+  $("#wlForm").innerHTML = `<div class="empty"><span class="spin">🧶</span> Sniffing the airwaves…</div>`;
+  try { ui.wl = await api("/wifi/settings"); renderWifiSettings(); }
+  catch (ex) { $("#wlForm").innerHTML = `<div class="empty">🙀 ${esc(ex.message)}</div>`; }
+}
+
+function renderWifiSettings() {
+  const s = ui.wl;
+  if (!s) return;
+  const pc = thisPc();
+  $("#wlForm").innerHTML = s.bands.map(b => {
+    const k = b.band.replace(".", "");
+    const bb = band(b.band);
+    const clients = ui.snap ? ui.snap.devices.filter(d => d.band === b.band).length : null;
+    return `
+    <div class="glass panel wifi wl-card" style="--g:${bb.g}">
+      <div class="stripe"></div>
+      <h3><span class="band-tag">${bb.label}</span> ${b.radioOn ? "" : `<span class="badge blk">radio off</span>`}
+        ${pc?.band === b.band ? `<span class="badge warn" title="Saving changes to this band drops this PC's connection for a moment">💻 this PC is on it</span>` : ""}</h3>
+      <label>Network name (SSID) <input id="wlSsid${k}" maxlength="32" value="${esc(b.ssid)}" required></label>
+      <label>Password <span class="pw-row"><input id="wlPw${k}" type="password" maxlength="64" placeholder="•••••••• (unchanged)" autocomplete="new-password">
+        <button type="button" class="btn sm" data-wl-peek="${k}">😼 Peek</button></span></label>
+      <div class="row">
+        <label>Channel <select id="wlCh${k}">${(b.channelOptions.length ? b.channelOptions : [b.channel]).map(c =>
+          `<option value="${c}" ${c === b.channel ? "selected" : ""}>${c === "0" ? "Auto 🎲" : c}</option>`).join("")}</select></label>
+        <label class="check wl-bc"><input type="checkbox" id="wlBc${k}" ${b.broadcast ? "checked" : ""}> Broadcast name</label>
+      </div>
+      <dl class="kv">
+        <dt>Mode</dt><dd>${esc(b.mode)}</dd>
+        <dt>Security</dt><dd>${esc(b.security)}</dd>
+        ${clients == null ? "" : `<dt>Cats on it now</dt><dd>${clients}</dd>`}
+      </dl>
+    </div>`;
+  }).join("") + `
+    <div class="wl-actions">
+      <span class="muted small">Leave the password empty to keep the current one. With broadcast off the network still works, but devices must type its name to join.</span>
+      <button type="submit" class="btn primary" id="wlSave"><i class="paw"></i> Save Wi-Fi settings</button>
+    </div>`;
+  $("#wlForm").onsubmit = saveWifi;
+}
+
+async function peekWifiPw(btn) {
+  const k = btn.dataset.wlPeek, input = $(`#wlPw${k}`);
+  if (input.type === "text") { input.type = "password"; btn.textContent = "😼 Peek"; return; }
+  if (!input.value) {
+    try { input.value = (await api(`/wifi/${k === "24" ? "2.4" : "5"}/password`)).password || ""; input.dataset.current = input.value; }
+    catch (ex) { return toast(ex.message, "bad"); }
+  }
+  input.type = "text"; btn.textContent = "🙈 Hide";
+}
+
+async function saveWifi(ev) {
+  ev.preventDefault();
+  const body = {}, changed = [];
+  for (const b of ui.wl.bands) {
+    const k = b.band.replace(".", ""), c = {};
+    const ssid = $(`#wlSsid${k}`).value, pwEl = $(`#wlPw${k}`), ch = $(`#wlCh${k}`).value, bc = $(`#wlBc${k}`).checked;
+    if (ssid !== b.ssid) c.ssid = ssid;
+    if (pwEl.value && pwEl.value !== pwEl.dataset.current) c.password = pwEl.value;
+    if (ch !== b.channel) c.channel = ch;
+    if (bc !== b.broadcast) c.broadcast = bc;
+    if (Object.keys(c).length) { body[bandKey(b.band)] = c; changed.push(b.band); }
+  }
+  if (!changed.length) return toast("Nothing changed. The cats are content. 😺", "ok");
+  const pc = thisPc();
+  const pcChange = pc && body[bandKey(pc.band)];
+  const lines = changed.map(bn => {
+    const c = body[bandKey(bn)];
+    return `${band(bn).label}: ${[c.ssid != null && `name → “${c.ssid}”`, c.password && "new password", c.channel && `channel → ${c.channel === "0" ? "Auto" : c.channel}`,
+      c.broadcast != null && (c.broadcast ? "broadcast the name" : "hide the name")].filter(Boolean).join(", ")}`;
+  });
+  const ok = await confirmBox("Save Wi-Fi settings?",
+    `${lines.join(" · ")}. The router restarts its Wi-Fi, so wireless devices drop off for a moment.` +
+    (pcChange ? ` This PC is on ${band(pc.band).label}: it will lose its connection too${pcChange.ssid != null || pcChange.password ? " and must rejoin with the new name/password" : ""}.` : ""),
+    "📶 Save", true);
+  if (!ok) return;
+  const btn = $("#wlSave");
+  btn.disabled = true; btn.innerHTML = `<span class="spin">🧶</span> Saving… (the router takes a moment)`;
+  try {
+    ui.wl = await api("/wifi/settings", { method: "PUT", body });
+    renderWifiSettings();
+    toast("Wi-Fi settings saved. The cats will find their way back. 😺", "ok");
+    load(true);
+  } catch (ex) {
+    toast(ex.message, "bad");
+    btn.disabled = false; btn.innerHTML = `<i class="paw"></i> Save Wi-Fi settings`;
+  }
 }
 
 // ───────────────────────── modal helpers ─────────────────────────

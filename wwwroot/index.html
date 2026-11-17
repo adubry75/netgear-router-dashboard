@@ -57,6 +57,7 @@
       <button data-tab="overview" class="on">😺 Overview</button>
       <button data-tab="ports">🚪 Port forwarding</button>
       <button data-tab="dhcp">🧺 DHCP reservations</button>
+      <button data-tab="wifi">📶 Wi-Fi settings</button>
     </nav>
 
     <div id="banner" class="banner" hidden></div>
@@ -118,6 +119,19 @@
         <p class="muted small pf-blurb">A reservation tells the router to always hand a device the same IP address, so port forwarding rules and bookmarks keep pointing at it.</p>
         <div id="rsvInfo" class="rsv-info"></div>
         <div id="rsvList" class="pf-list"></div>
+      </section>
+    </div>
+
+    <div class="tabpane" data-pane="wifi" hidden>
+      <section class="glass ports eared">
+        <div class="dev-head">
+          <h2>Wi-Fi settings <span class="muted small h-sub"><i class="paw"></i> where the cats roam</span></h2>
+          <div class="dev-tools">
+            <button class="btn ghost" id="wlReload">🧶 Reload</button>
+          </div>
+        </div>
+        <p class="muted small pf-blurb">Changing anything here restarts the router's Wi-Fi: every wireless device drops off for a moment, and if you change a name or password they'll need the new one.</p>
+        <form id="wlForm" class="wl-grid" autocomplete="off"></form>
       </section>
     </div>
 
